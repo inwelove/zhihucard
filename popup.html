@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ZhihuCard</title>
+    <style>
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 16px;
+        background: #ffffff;
+        color: #1a1a1a;
+        font-family: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 700;
+        margin: 0 0 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h1 img {
+        width: 20px;
+        height: 20px;
+      }
+      p.desc {
+        font-size: 12px;
+        color: #8590a6;
+        line-height: 1.5;
+        margin: 0 0 16px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-top: 1px solid #ebebeb;
+      }
+      .row label {
+        font-size: 13px;
+        color: #1a1a1a;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 38px;
+        height: 22px;
+        flex-shrink: 0;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        inset: 0;
+        background: #cfd9de;
+        border-radius: 9999px;
+        transition: background-color 0.15s ease;
+      }
+      .slider::before {
+        content: "";
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        left: 3px;
+        top: 3px;
+        background: #ffffff;
+        border-radius: 50%;
+        transition: transform 0.15s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      }
+      input:checked + .slider {
+        background: #0066ff;
+      }
+      input:checked + .slider::before {
+        transform: translateX(16px);
+      }
+      footer {
+        margin-top: 16px;
+        font-size: 12px;
+      }
+      footer a {
+        color: #0066ff;
+        text-decoration: none;
+      }
+      footer a:hover {
+        text-decoration: underline;
+      }
+      .brand-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #ebebeb;
+        color: #8590a6;
+        font-size: 12px;
+        text-decoration: none;
+      }
+      .brand-bar img {
+        height: 20px;
+        width: auto;
+        flex-shrink: 0;
+      }
+      .brand-bar:hover {
+        color: #0066ff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1><img src="icons/icon48.png" alt="" />ZhihuCard</h1>
+    <p class="desc" data-i18n="extDescription">一键把知乎文章变成精美分享卡片。</p>
+
+    <div class="row">
+      <label for="watermark-toggle" data-i18n="watermarkLabel">在卡片上显示 ZhihuCard 署名</label>
+      <span class="switch">
+        <input type="checkbox" id="watermark-toggle" />
+        <span class="slider"></span>
+      </span>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

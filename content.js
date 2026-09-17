@@ -1,0 +1,1855 @@
+// ZhihuCard content script.
+// Injects a "Generate card" button into Zhihu article/answer pages,
+// extracts data straight from the DOM, and opens a preview modal.
+
+(() => {
+  "use strict";
+
+  const BTN_CLASS = "zhihucard-btn";
+  const processed = new WeakSet();
+
+  // ============================================================
+  // i18n
+  // ============================================================
+
+  const I18N_FALLBACK = {
+    generateCardButton: "生成卡片",
+    cardGeneratingText: "卡片生成中，需要等待几秒钟…",
+    styleWhite: "白色",
+    styleDark: "黑色",
+    styleWallpaper: "壁纸",
+    wallpaperSuffix: "壁纸",
+    uploadBackgroundTitle: "上传背景",
+    processingText: "处理中…",
+    customBgLimitText: "自定义背景最多 %s 张，先删一张再传",
+    uploadFailedText: "上传失败",
+    deleteBgTitle: "删除这张背景",
+    customBgLabel: "自定义背景 %s",
+    moreWallpapers: "更多壁纸 ▸",
+    collapseWallpapers: "收起 ◂",
+    hideStatsLabel: "隐藏互动数据",
+    hideTimeLabel: "隐藏时间",
+    translateLabel: "翻译",
+    translatingText: "翻译中…",
+    translateFailedText: "翻译服务连不上（国内需代理）",
+    copyImageButton: "复制图片",
+    copiedText: "已复制 ✓",
+    copyFailedText: "复制失败",
+    downloadPngButton: "下载 PNG",
+    downloadGeneratingText: "生成中…",
+    renderFailedText: "渲染失败",
+    closeButton: "关闭",
+    scrollHintText: "复制按钮在下面 ↓",
+    langToggleTitle: "切换界面语言",
+    cardColorLabel: "卡片",
+    opacityLabel: "透明度",
+    customProfileLabel: "自定义头像和昵称",
+    customNicknameLabel: "昵称",
+    customNicknamePlaceholder: "留空则使用原作者昵称",
+    customAvatarLabel: "头像",
+    customAvatarUpload: "上传头像",
+    customAvatarClear: "恢复默认",
+    customSignatureLabel: "个人签名",
+    customSignaturePlaceholder: "留空则使用原作者签名",
+  };
+
+  function applyFallbackSubstitutions(template, substitutions) {
+    if (substitutions == null) return template;
+    const subs = Array.isArray(substitutions) ? substitutions : [substitutions];
+    let i = 0;
+    return template.replace(/%s/g, () => (i < subs.length ? String(subs[i++]) : "%s"));
+  }
+
+  let uiLangOverride = "auto";
+  let overrideMessages = null;
+  const overrideMessagesCache = {};
+
+  function getUiLangSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ uiLang: "auto" }, (res) =>
+          resolve(res.uiLang === "zh" || res.uiLang === "en" ? res.uiLang : "auto")
+        );
+      } catch (_) {
+        resolve("auto");
+      }
+    });
+  }
+
+  function saveUiLang(lang) {
+    try {
+      chrome.storage.sync.set({ uiLang: lang });
+    } catch (_) {}
+  }
+
+  async function applyUiLang(lang) {
+    uiLangOverride = lang;
+    if (lang !== "zh" && lang !== "en") {
+      overrideMessages = null;
+      return;
+    }
+    if (!overrideMessagesCache[lang]) {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "getMessages", lang });
+        if (res && res.ok && res.messages) overrideMessagesCache[lang] = res.messages;
+      } catch (_) {}
+    }
+    overrideMessages = overrideMessagesCache[lang] || null;
+  }
+
+  function resolveRawMessage(entry, substitutions) {
+    const subs = substitutions == null ? [] : Array.isArray(substitutions) ? substitutions : [substitutions];
+    const placeholders = entry.placeholders || {};
+    return (entry.message || "").replace(/\$([A-Za-z0-9_]+)\$/g, (whole, name) => {
+      const ph = placeholders[name.toLowerCase()] || placeholders[name];
+      if (!ph) return whole;
+      const m = String(ph.content || "").match(/^\$(\d+)$/);
+      if (!m) return ph.content || "";
+      const idx = parseInt(m[1], 10) - 1;
+      return subs[idx] != null ? String(subs[idx]) : "";
+    });
+  }
+
+  function t(key, substitutions) {
+    if (overrideMessages && overrideMessages[key]) {
+      return resolveRawMessage(overrideMessages[key], substitutions);
+    }
+    try {
+      const msg = chrome.i18n.getMessage(key, substitutions);
+      if (msg) return msg;
+    } catch (_) {}
+    return applyFallbackSubstitutions(I18N_FALLBACK[key] || key, substitutions);
+  }
+
+  function uiLanguageIsChinese() {
+    if (uiLangOverride === "zh") return true;
+    if (uiLangOverride === "en") return false;
+    try {
+      return (chrome.i18n.getUILanguage() || "").toLowerCase().indexOf("zh") === 0;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function effectiveLocale() {
+    if (uiLangOverride === "zh") return "zh-CN";
+    if (uiLangOverride === "en") return "en";
+    try {
+      return chrome.i18n.getUILanguage() || "zh-CN";
+    } catch (_) {
+      return "zh-CN";
+    }
+  }
+
+  function translateTargetLang(text) {
+    if (isPrimarilyChinese(text)) return "en";
+    return uiLanguageIsChinese() ? "zh-CN" : "en";
+  }
+
+  getUiLangSetting().then(applyUiLang);
+
+  // ============================================================
+  // Page type detection
+  // ============================================================
+
+  function detectPageType() {
+    const href = location.href;
+    if (/zhuanlan\.zhihu\.com\/p\//.test(href)) return "article";
+    if (/zhihu\.com\/question\/\d+\/answer\//.test(href) || /zhihu\.com\/answer\//.test(href)) return "answer";
+    if (/zhihu\.com\/question\/\d+/.test(href)) return "question";
+    return null;
+  }
+
+  // ============================================================
+  // Button injection
+  // ============================================================
+
+  const CAMERA_ICON =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 ' +
+    '2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+
+  function createButton() {
+    const btn = document.createElement("div");
+    btn.className = BTN_CLASS;
+    btn.setAttribute("role", "button");
+    btn.setAttribute("tabindex", "0");
+    btn.setAttribute("aria-label", t("generateCardButton"));
+    btn.title = t("generateCardButton");
+    Object.assign(btn.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: "32px",
+      height: "32px",
+      borderRadius: "4px",
+      color: "#ffffff",
+      cursor: "pointer",
+      backgroundColor: "#0066ff",
+      border: "none",
+      transition: "background-color 0.2s ease",
+      flexShrink: "0",
+      padding: "0 8px",
+      verticalAlign: "middle",
+      fontSize: "13px",
+      fontWeight: "600",
+    });
+    btn.innerHTML = CAMERA_ICON;
+    btn.addEventListener("mouseenter", () => {
+      btn.style.backgroundColor = "#0052cc";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.backgroundColor = "#0066ff";
+    });
+    return btn;
+  }
+
+  function isFollowText(txt) {
+    txt = (txt || "").trim();
+    return txt === "+ 关注" || txt === "+关注" || txt === "关注" || txt === "Follow" || txt === "+ Follow";
+  }
+
+  function isInPageHeader(el) {
+    return !!(el.closest(".AppHeader")
+      || el.closest(".AppHeader-inner")
+      || el.closest(".TopstoryPageHeader")
+      || el.closest("header.AppHeader")
+      || el.closest("nav.AppHeader"));
+  }
+
+  function findFollowInScope(scope) {
+    if (!scope) return null;
+    const btns = scope.querySelectorAll("button, .FollowButton");
+    for (const btn of btns) {
+      if (isInPageHeader(btn)) continue;
+      if (isFollowText(btn.textContent) || btn.classList.contains("FollowButton")) return btn;
+    }
+    return null;
+  }
+
+  function findAnswerItemFromEl(el) {
+    if (!el) return null;
+    return el.closest(".AnswerItem")
+      || el.closest(".List-item")
+      || el.closest(".ContentItem")
+      || el;
+  }
+
+  function injectBesideFollow(followBtn, pageType, sourceEl) {
+    if (!followBtn || !followBtn.parentNode) return;
+    if (followBtn.parentNode.querySelector(`.${BTN_CLASS}`)) return;
+    if (processed.has(followBtn)) return;
+    processed.add(followBtn);
+
+    const btn = createButton();
+    Object.assign(btn.style, { marginRight: "8px" });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // 列表页：点击时从关注按钮向上找对应的回答条目
+      const item = sourceEl === null ? (findAnswerItemFromEl(followBtn) || followBtn) : sourceEl;
+      console.log("ZhihuCard: button clicked, pageType=", pageType, "item=", item);
+      handleGenerateClick(pageType, item);
+    });
+    followBtn.parentNode.insertBefore(btn, followBtn);
+  }
+
+  function injectButtonForArticle() {
+    const followBtn = findFollowInScope(document.querySelector(".Post-SideColumn"))
+      || findFollowInScope(document.querySelector(".Post-Author"))
+      || findFollowInScope(document.querySelector(".AuthorInfo"));
+    injectBesideFollow(followBtn, "article", document);
+  }
+
+  function injectButtonsForAnswers() {
+    const scopes = document.querySelectorAll(".AnswerItem, .List-item");
+    scopes.forEach((scope) => {
+      if (isInPageHeader(scope)) return;
+      const followBtn = findFollowInScope(scope.querySelector(".AuthorInfo") || scope);
+      injectBesideFollow(followBtn, "answer", null);
+    });
+  }
+
+  function injectButtons() {
+    const pageType = detectPageType();
+    if (pageType === "article") injectButtonForArticle();
+    else if (pageType === "answer" || pageType === "question") injectButtonsForAnswers();
+  }
+
+  const observer = new MutationObserver(() => {
+    injectButtons();
+  });
+
+  function startObserving() {
+    injectButtons();
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.body) startObserving();
+  else document.addEventListener("DOMContentLoaded", startObserving, { once: true });
+
+  // ============================================================
+  // Data extraction
+  // ============================================================
+
+  function extractArticleData() {
+    // 标题 - 多种选择器，优先级从高到低
+    const titleEl = document.querySelector(".Post-Title")
+      || document.querySelector("h1.Post-Title")
+      || document.querySelector(".ArticleItem-title")
+      || document.querySelector("h1");
+    const title = titleEl ? titleEl.textContent.trim() : "";
+
+    // 作者 - 多种选择器
+    const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link") 
+      || document.querySelector(".Post-AuthorInfo .UserLink-link")
+      || document.querySelector(".UserLink-link");
+    const author = authorEl ? authorEl.textContent.trim() : "";
+
+    // 头像
+    const avatarEl = document.querySelector(".AuthorInfo-avatar img") 
+      || document.querySelector(".Post-AuthorInfoAvatar img")
+      || document.querySelector(".AuthorInfo img");
+    const avatar = avatarEl ? avatarEl.getAttribute("src") || avatarEl.src : "";
+
+    // 作者简介
+    const headlineEl = document.querySelector(".AuthorInfo-detail") 
+      || document.querySelector(".Post-AuthorInfo .AuthorInfo-detail");
+    const authorHeadline = headlineEl ? headlineEl.textContent.trim() : "";
+
+    // 正文 - 多种选择器
+    const contentEl = document.querySelector(".RichText.ztext.Post-RichText") 
+      || document.querySelector(".Post-RichTextContainer")
+      || document.querySelector(".RichText")
+      || document.querySelector(".Post-content");
+    let text = "";
+    let images = [];
+
+    if (contentEl) {
+      text = extractTextFromElement(contentEl);
+      images = extractImagesFromElement(contentEl);
+    }
+
+    // 时间
+    const timeEl = document.querySelector(".ContentItem-time time") 
+      || document.querySelector(".Post-Row-Content time")
+      || document.querySelector("time[datetime]");
+    const datetime = timeEl ? timeEl.getAttribute("datetime") : null;
+
+    // 统计数据
+    const stats = extractStatsFromToolbar(".Post-Toolbox .ContentItem-actions") 
+      || extractStatsFromToolbar(".ContentItem-actions");
+
+    return {
+      type: "article",
+      title,
+      author,
+      avatar,
+      authorHeadline,
+      text,
+      images,
+      stats,
+      datetime,
+      url: location.href,
+    };
+  }
+
+  function extractAnswerData() {
+    // 问题标题 - 多种选择器
+    const questionTitleEl = document.querySelector(".QuestionHeader-title") 
+      || document.querySelector("h1");
+    const title = questionTitleEl ? questionTitleEl.textContent.trim() : "";
+
+    // 作者 - 多种选择器
+    const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link") 
+      || document.querySelector(".AnswerItem .AuthorInfo .UserLink-link")
+      || document.querySelector(".UserLink-link");
+    const author = authorEl ? authorEl.textContent.trim() : "";
+
+    // 头像
+    const avatarEl = document.querySelector(".AuthorInfo-avatar img") 
+      || document.querySelector(".AnswerItem .AuthorInfo img")
+      || document.querySelector(".AuthorInfo img");
+    const avatar = avatarEl ? avatarEl.getAttribute("src") || avatarEl.src : "";
+
+    // 作者简介
+    const headlineEl = document.querySelector(".AnswerItem .AuthorInfo-detail") 
+      || document.querySelector(".AuthorInfo-detail");
+    const authorHeadline = headlineEl ? headlineEl.textContent.trim() : "";
+
+    // 正文 - 多种选择器
+    const contentEl = document.querySelector(".RichContent-inner .RichText") 
+      || document.querySelector(".QuestionAnswer-content .RichText")
+      || document.querySelector(".RichContent-inner")
+      || document.querySelector(".RichText");
+    let text = "";
+    let images = [];
+
+    if (contentEl) {
+      text = extractTextFromElement(contentEl);
+      images = extractImagesFromElement(contentEl);
+    }
+
+    // 时间
+    const timeEl = document.querySelector(".AnswerItem .ContentItem-time time") 
+      || document.querySelector(".QuestionAnswer-content time")
+      || document.querySelector("time[datetime]");
+    const datetime = timeEl ? timeEl.getAttribute("datetime") : null;
+
+    // 统计数据 - 多种选择器
+    const stats = extractStatsFromToolbar(".AnswerItem .ContentItem-actions") 
+      || extractStatsFromToolbar(".RichContent-actions")
+      || extractStatsFromToolbar('[role="group"]');
+
+    return {
+      type: "answer",
+      title,
+      author,
+      avatar,
+      authorHeadline,
+      text,
+      images,
+      stats,
+      datetime,
+      url: location.href,
+    };
+  }
+
+  function extractAnswerDataFromItem(item) {
+    if (!item || item.nodeType !== 1) return null;
+
+    const q = (sel) => item.querySelector(sel);
+
+    // 问题标题（所有回答共享，从页面级取）
+    const titleEl = document.querySelector(".QuestionHeader-title") || document.querySelector("h1");
+    const title = titleEl ? titleEl.textContent.trim() : "";
+
+    // 作者
+    const authorEl = q(".AuthorInfo-name .UserLink-link") || q(".AuthorInfo .UserLink-link") || q(".UserLink-link");
+    const author = authorEl ? authorEl.textContent.trim() : "";
+
+    // 头像
+    const avatarEl = q(".AuthorInfo-avatar img") || q(".AuthorInfo img");
+    const avatar = avatarEl ? (avatarEl.getAttribute("src") || avatarEl.src) : "";
+
+    // 作者简介
+    const headlineEl = q(".AuthorInfo-detail");
+    const authorHeadline = headlineEl ? headlineEl.textContent.trim() : "";
+
+    // 正文：优先取正文容器，找不到再回退到条目整体
+    const contentEl = q(".RichContent-inner .RichText")
+      || q(".QuestionAnswer-content .RichText")
+      || q(".RichContent-inner")
+      || q(".RichContent")
+      || q(".RichText");
+    let text = "";
+    let images = [];
+    if (contentEl) {
+      text = extractTextFromElement(contentEl);
+      images = extractImagesFromElement(contentEl);
+    }
+    if (!text.trim() && contentEl !== item) {
+      text = extractTextFromElement(item);
+      images = extractImagesFromElement(item);
+    }
+
+    // 时间
+    const timeEl = q(".ContentItem-time time") || q("time[datetime]");
+    const datetime = timeEl ? timeEl.getAttribute("datetime") : null;
+
+    // 统计数据
+    const toolbar = q(".ContentItem-actions") || q(".RichContent-actions") || q('[role="group"]');
+    const stats = extractStatsFromToolbarEl(toolbar);
+
+    return {
+      type: "answer",
+      title,
+      author,
+      avatar,
+      authorHeadline,
+      text,
+      images,
+      stats,
+      datetime,
+      url: location.href,
+    };
+  }
+
+  function extractTextFromElement(el) {
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll("style, script, .RichText-zwlink").forEach((n) => n.remove());
+
+    let out = "";
+    function walk(node) {
+      if (node.nodeType === 3) {
+        const raw = node.nodeValue;
+        out += raw;
+      } else if (node.nodeType === 1) {
+        const tag = node.tagName;
+        if (tag === "BR") {
+          out += "\n";
+          return;
+        }
+        if (tag === "IMG" || tag === "FIGURE" || tag === "PICTURE" || tag === "VIDEO" || tag === "NOSCRIPT") {
+          return;
+        }
+        if (tag === "P" || tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4") {
+          if (out && !out.endsWith("\n")) out += "\n";
+        }
+        if (tag === "LI") {
+          out += "\u2022 ";
+        }
+        for (const child of node.childNodes) {
+          walk(child);
+        }
+        if (tag === "P" || tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4") {
+          if (!out.endsWith("\n")) out += "\n";
+        }
+      }
+    }
+    for (const child of clone.childNodes) {
+      walk(child);
+    }
+    return out.replace(/<[^>]+>/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function extractImagesFromElement(el) {
+    const results = [];
+    el.querySelectorAll("img").forEach((img) => {
+      const src = bestImgSrc(img);
+      if (!src || src.startsWith("data:")) return;
+      if (/equation|latex|formula/i.test(src)) return;
+      const container = img.closest("figure") || img.parentElement;
+      let aspectRatio = null;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          aspectRatio = rect.width / rect.height;
+        }
+      }
+      results.push({ url: src, aspectRatio });
+    });
+    return results.slice(0, 4);
+  }
+
+  function extractStatsFromToolbarEl(toolbar) {
+    const stats = { likes: 0, comments: 0, bookmarks: 0, hearts: 0 };
+    if (!toolbar) return stats;
+
+    // 赞同按钮 - 多种选择器兼容
+    const likeBtn = toolbar.querySelector('.VoteButton--up, .VoteButton--up .CountValue, [aria-label*="赞同"], [aria-label*="like"]');
+    if (likeBtn) {
+      const m = likeBtn.textContent.match(/([\d,.]+[KMB]?)/);
+      if (m) stats.likes = parseCount(m[1]);
+    }
+
+    // 评论按钮
+    const commentBtn = toolbar.querySelector('button[aria-label*="评论"], button[aria-label*="comment"], .CommentButton');
+    if (commentBtn) {
+      const m = commentBtn.textContent.match(/([\d,.]+[KMB]?)/);
+      if (m) stats.comments = parseCount(m[1]);
+    }
+
+    // 收藏按钮
+    const bookmarkBtn = toolbar.querySelector('button[aria-label*="收藏"], button[aria-label*="bookmark"], .BookmarkButton');
+    if (bookmarkBtn) {
+      const m = bookmarkBtn.textContent.match(/([\d,.]+[KMB]?)/);
+      if (m) stats.bookmarks = parseCount(m[1]);
+    }
+
+    // 喜欢按钮 (❤)
+    const heartBtn = toolbar.querySelector('button[aria-label*="喜欢"], button[aria-label*="heart"], button[aria-label*="Hearts"]');
+    if (heartBtn) {
+      const m = heartBtn.textContent.match(/([\d,.]+[KMB]?)/);
+      if (m) stats.hearts = parseCount(m[1]);
+    }
+
+    return stats;
+  }
+
+  function extractStatsFromToolbar(selector) {
+    return extractStatsFromToolbarEl(document.querySelector(selector));
+  }
+
+  // ============================================================
+  // js-initialData fallback (more reliable than DOM selectors)
+  // ============================================================
+
+  function extractFromInitialData() {
+    try {
+      const scriptEl = document.querySelector('script#js-initialData[type="text/json"]');
+      if (!scriptEl) return null;
+
+      const data = JSON.parse(scriptEl.textContent);
+      if (!data || !data.initialState || !data.initialState.entities) return null;
+
+      const entities = data.initialState.entities;
+      const url = location.href;
+
+      // 文章页面
+      if (/zhuanlan\.zhihu\.com\/p\//.test(url)) {
+        const articles = entities.articles || {};
+        const article = Object.values(articles)[0];
+        if (!article) return null;
+
+        // 从 URL 提取文章 ID
+        const match = url.match(/\/p\/(\d+)/);
+        const articleId = match ? match[1] : null;
+        const articleData = articleId ? articles[articleId] : article;
+
+        return {
+          type: "article",
+          title: articleData.title || "",
+          author: (articleData.author && articleData.author.name) || "",
+          avatar: (articleData.author && articleData.author.avatarUrl) || "",
+          authorHeadline: (articleData.author && articleData.author.headline) || "",
+          text: stripHtml(articleData.content || ""),
+          images: extractImagesFromHtml(articleData.content || ""),
+          stats: {
+            likes: articleData.voteupCount || 0,
+            comments: articleData.commentCount || 0,
+            bookmarks: articleData.stats ? (articleData.stats.favoritesCount || 0) : 0,
+            hearts: articleData.likeCount || 0,
+          },
+          datetime: articleData.created ? new Date(articleData.created * 1000).toISOString() : null,
+          url: url,
+        };
+      }
+
+      // 回答页面
+      if (/zhihu\.com\/question\/\d+\/answer\//.test(url) || /zhihu\.com\/answer\//.test(url)) {
+        const answers = entities.answers || {};
+        const answer = Object.values(answers)[0];
+        if (!answer) return null;
+
+        const match = url.match(/\/answer\/(\d+)/);
+        const answerId = match ? match[1] : null;
+        const answerData = answerId ? answers[answerId] : answer;
+
+        const question = answerData.question || {};
+        return {
+          type: "answer",
+          title: question.title || "",
+          author: (answerData.author && answerData.author.name) || "",
+          avatar: (answerData.author && answerData.author.avatarUrl) || "",
+          authorHeadline: (answerData.author && answerData.author.headline) || "",
+          text: stripHtml(answerData.content || ""),
+          images: extractImagesFromHtml(answerData.content || ""),
+          stats: {
+            likes: answerData.voteupCount || 0,
+            comments: answerData.commentCount || 0,
+            bookmarks: answerData.stats ? (answerData.stats.favoritesCount || 0) : 0,
+            hearts: answerData.likeCount || 0,
+          },
+          datetime: answerData.createdTime ? new Date(answerData.createdTime * 1000).toISOString() : null,
+          url: url,
+        };
+      }
+    } catch (e) {
+      console.warn("ZhihuCard: js-initialData parse failed", e);
+    }
+    return null;
+  }
+
+  function stripHtml(html) {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    let out = "";
+    function walk(node) {
+      if (node.nodeType === 3) {
+        out += node.nodeValue;
+      } else if (node.nodeType === 1) {
+        const tag = node.tagName;
+        if (tag === "BR") { out += "\n"; return; }
+        if (tag === "IMG" || tag === "FIGURE" || tag === "PICTURE" || tag === "VIDEO" || tag === "NOSCRIPT") { return; }
+        if (tag === "P" || tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4") {
+          if (out && !out.endsWith("\n")) out += "\n";
+        }
+        if (tag === "LI") { out += "\u2022 "; }
+        for (const child of node.childNodes) walk(child);
+        if (tag === "P" || tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4") {
+          if (!out.endsWith("\n")) out += "\n";
+        }
+      }
+    }
+    for (const child of div.childNodes) walk(child);
+    return out.replace(/<[^>]+>/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function bestImgSrc(img) {
+    return img.getAttribute("data-original")
+      || img.getAttribute("data-actualsrc")
+      || img.getAttribute("data-src")
+      || img.getAttribute("src")
+      || "";
+  }
+
+  function extractImagesFromHtml(html) {
+    const results = [];
+    const seen = new Set();
+    function addUrl(url) {
+      if (!url || url.startsWith("data:") || /equation|latex|formula/i.test(url)) return;
+      if (seen.has(url)) return;
+      seen.add(url);
+      results.push({ url: url, aspectRatio: null });
+    }
+
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    div.querySelectorAll("img").forEach((img) => {
+      addUrl(bestImgSrc(img));
+    });
+
+    if (results.length === 0) {
+      const tagRegex = /<img\b[^>]*?>/gi;
+      const attrRegex = /(?:data-original|data-actualsrc|data-src|src)\s*=\s*(?:"([^"]+)"|'([^']+)')/i;
+      let m;
+      while ((m = tagRegex.exec(html)) !== null) {
+        const tag = m[0];
+        const a = attrRegex.exec(tag);
+        if (a) addUrl(a[1] || a[2]);
+      }
+    }
+
+    if (results.length === 0) {
+      const textContent = div.textContent || "";
+      const urlRegex = /https?:\/\/[^\s<>"']+\.(?:jpg|jpeg|png|gif|webp)(?:\?[^\s<>"']*)?/gi;
+      let m;
+      while ((m = urlRegex.exec(textContent)) !== null) {
+        addUrl(m[0]);
+      }
+    }
+
+    return results.slice(0, 4);
+  }
+
+  function parseCount(s) {
+    if (s == null) return 0;
+    s = String(s).replace(/[,，\s]/g, "");
+    const m = s.match(/([\d.]+)([KMB万亿]?)/i);
+    if (!m) return 0;
+    let n = parseFloat(m[1]);
+    if (isNaN(n)) return 0;
+    const u = m[2].toUpperCase();
+    if (u === "K") n *= 1e3;
+    else if (u === "M") n *= 1e6;
+    else if (u === "B") n *= 1e9;
+    else if (m[2] === "万") n *= 1e4;
+    else if (m[2] === "亿") n *= 1e8;
+    return Math.round(n);
+  }
+
+  const CHINESE_RE = /[一-鿿]/g;
+
+  function isPrimarilyChinese(text) {
+    const stripped = (text || "").replace(/\s/g, "");
+    if (!stripped.length) return false;
+    const zh = (stripped.match(CHINESE_RE) || []).length;
+    return zh / stripped.length >= 0.1;
+  }
+
+  // ============================================================
+  // Settings
+  // ============================================================
+
+  function getWatermarkSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ watermark: false }, (res) => resolve(!!res.watermark));
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  const VALID_STYLES = ["white", "dark", "warm", "cool", "paper", "minimal", "cherry", "tianya", "retro", "matcha", "chocolate", "blueberry", "redTeal", "wallpaper"];
+
+  function getSavedStyle() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ theme: "white" }, (res) =>
+          resolve(VALID_STYLES.includes(res.theme) ? res.theme : "white")
+        );
+      } catch (_) {
+        resolve("white");
+      }
+    });
+  }
+
+  function saveStyle(style) {
+    try {
+      chrome.storage.sync.set({ theme: style });
+    } catch (_) {}
+  }
+
+  const MAX_CUSTOM_BACKGROUNDS = 6;
+
+  function getCustomBackgrounds() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get({ customBgs: [], customBg: null }, (res) => {
+          if (Array.isArray(res.customBgs)) {
+            resolve(res.customBgs);
+          } else if (res.customBg) {
+            const migrated = [res.customBg];
+            chrome.storage.local.set({ customBgs: migrated }, () => {
+              chrome.storage.local.remove("customBg", () => resolve(migrated));
+            });
+          } else {
+            resolve([]);
+          }
+        });
+      } catch (_) {
+        resolve([]);
+      }
+    });
+  }
+
+  function setCustomBackgrounds(list) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.set({ customBgs: list }, () => resolve());
+      } catch (_) {
+        resolve();
+      }
+    });
+  }
+
+  function getHideStatsSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ hideStats: false }, (res) => resolve(!!res.hideStats));
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  function saveHideStats(value) {
+    try {
+      chrome.storage.sync.set({ hideStats: !!value });
+    } catch (_) {}
+  }
+
+  function getHideTimeSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ hideTime: false }, (res) => resolve(!!res.hideTime));
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  function saveHideTime(value) {
+    try {
+      chrome.storage.sync.set({ hideTime: !!value });
+    } catch (_) {}
+  }
+
+  function getParagraphGapSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ paragraphGap: false }, (res) => resolve(!!res.paragraphGap));
+      } catch (_) { resolve(false); }
+    });
+  }
+  function saveParagraphGap(value) {
+    try { chrome.storage.sync.set({ paragraphGap: !!value }); } catch (_) {}
+  }
+
+  function getTitleFontSizeSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ titleFontSize: 22 }, (res) => resolve(Number(res.titleFontSize) || 22));
+      } catch (_) { resolve(22); }
+    });
+  }
+  function saveTitleFontSize(value) {
+    try { chrome.storage.sync.set({ titleFontSize: Number(value) || 22 }); } catch (_) {}
+  }
+
+  function getBodyFontSizeSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ bodyFontSize: 16 }, (res) => resolve(Number(res.bodyFontSize) || 16));
+      } catch (_) { resolve(16); }
+    });
+  }
+  function saveBodyFontSize(value) {
+    try { chrome.storage.sync.set({ bodyFontSize: Number(value) || 16 }); } catch (_) {}
+  }
+
+  function getHideLinkSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ hideLink: false }, (res) => resolve(!!res.hideLink));
+      } catch (_) { resolve(false); }
+    });
+  }
+  function saveHideLink(value) {
+    try { chrome.storage.sync.set({ hideLink: !!value }); } catch (_) {}
+  }
+
+  function getCustomAvatarSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ customAvatar: "" }, (res) => resolve(typeof res.customAvatar === "string" ? res.customAvatar : ""));
+      } catch (_) { resolve(""); }
+    });
+  }
+  function saveCustomAvatar(value) {
+    try { chrome.storage.sync.set({ customAvatar: typeof value === "string" ? value : "" }); } catch (_) {}
+  }
+
+  function getCustomNicknameSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ customNickname: "" }, (res) => resolve(typeof res.customNickname === "string" ? res.customNickname : ""));
+      } catch (_) { resolve(""); }
+    });
+  }
+  function saveCustomNickname(value) {
+    try { chrome.storage.sync.set({ customNickname: typeof value === "string" ? value : "" }); } catch (_) {}
+  }
+
+  function getCustomSignatureSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ customSignature: "" }, (res) => resolve(typeof res.customSignature === "string" ? res.customSignature : ""));
+      } catch (_) { resolve(""); }
+    });
+  }
+  function saveCustomSignature(value) {
+    try { chrome.storage.sync.set({ customSignature: typeof value === "string" ? value : "" }); } catch (_) {}
+  }
+
+  const VALID_CARD_THEMES = ["white", "dark", "warm", "cool", "paper", "minimal", "cherry", "tianya", "retro", "matcha", "chocolate", "blueberry", "redTeal"];
+
+  function clampCardOpacity(v) {
+    const n = Math.round(Number(v));
+    if (isNaN(n)) return 100;
+    return Math.min(100, Math.max(30, n));
+  }
+
+  function getWallpaperCardSettings() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ wallpaperCardTheme: "white", wallpaperCardOpacity: 100 }, (res) =>
+          resolve({
+            theme: VALID_CARD_THEMES.includes(res.wallpaperCardTheme) ? res.wallpaperCardTheme : "white",
+            opacity: clampCardOpacity(res.wallpaperCardOpacity),
+          })
+        );
+      } catch (_) {
+        resolve({ theme: "white", opacity: 100 });
+      }
+    });
+  }
+
+  function saveWallpaperCardSettings(theme, opacity) {
+    try {
+      chrome.storage.sync.set({ wallpaperCardTheme: theme, wallpaperCardOpacity: opacity });
+    } catch (_) {}
+  }
+
+  const BUILTIN_BACKGROUNDS = [
+    { id: "aurora", name: "Aurora", file: "assets/bg-aurora.jpg" },
+    { id: "sunset", name: "Sunset", file: "assets/bg-sunset.jpg" },
+    { id: "rose", name: "Rose", file: "assets/bg-rose.jpg" },
+    { id: "ocean", name: "Ocean", file: "assets/bg-ocean.jpg" },
+    { id: "violet", name: "Violet", file: "assets/bg-violet.jpg" },
+    { id: "golden", name: "Golden", file: "assets/bg-golden.jpg" },
+    { id: "graphite", name: "Graphite", file: "assets/bg-graphite.jpg" },
+  ];
+
+  function builtinBackgroundUrl(entry) {
+    try {
+      return chrome.runtime.getURL(entry.file);
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function defaultWallpaperUrl() {
+    return builtinBackgroundUrl(BUILTIN_BACKGROUNDS[0]);
+  }
+
+  function getSavedBackgroundId() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ wallpaperBg: "aurora" }, (res) => resolve(res.wallpaperBg || "aurora"));
+      } catch (_) {
+        resolve("aurora");
+      }
+    });
+  }
+
+  function saveBackgroundId(id) {
+    try {
+      chrome.storage.sync.set({ wallpaperBg: id });
+    } catch (_) {}
+  }
+
+  function resolveBackgroundUrl(bgId, customBgs) {
+    if (typeof bgId === "string" && bgId.indexOf("custom:") === 0) {
+      const idx = parseInt(bgId.slice(7), 10);
+      if (Array.isArray(customBgs) && idx >= 0 && idx < customBgs.length) return customBgs[idx];
+      return defaultWallpaperUrl();
+    }
+    const entry = BUILTIN_BACKGROUNDS.find((b) => b.id === bgId);
+    if (entry) return builtinBackgroundUrl(entry);
+    return defaultWallpaperUrl();
+  }
+
+  function sanitizeBgId(bgId, customBgs) {
+    if (typeof bgId === "string" && bgId.indexOf("custom:") === 0) {
+      const idx = parseInt(bgId.slice(7), 10);
+      if (!(Array.isArray(customBgs) && idx >= 0 && idx < customBgs.length)) return "aurora";
+      return bgId;
+    }
+    if (BUILTIN_BACKGROUNDS.some((b) => b.id === bgId)) return bgId;
+    return "aurora";
+  }
+
+  function resizeImageFileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_SIDE = 2400;
+          let { width, height } = img;
+          if (width > MAX_SIDE || height > MAX_SIDE) {
+            if (width >= height) {
+              height = Math.round(height * (MAX_SIDE / width));
+              width = MAX_SIDE;
+            } else {
+              width = Math.round(width * (MAX_SIDE / height));
+              height = MAX_SIDE;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = () => reject(new Error("failed to decode image"));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ============================================================
+  // Preview modal
+  // ============================================================
+
+  function buildFilename(author) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(
+      now.getHours()
+    )}${pad(now.getMinutes())}`;
+    const cleanAuthor = (author || "zhihucard").replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, "") || "zhihucard";
+    return `${cleanAuthor}_${stamp}.png`;
+  }
+
+  function waitForImages(root, timeoutMs) {
+    const pending = Array.from(root.querySelectorAll("img")).map((img) =>
+      img.decode ? img.decode().catch(() => {}) : Promise.resolve()
+    );
+    if (!pending.length) return Promise.resolve();
+    return Promise.race([
+      Promise.all(pending),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs || 5000)),
+    ]);
+  }
+
+  function closeModal(host) {
+    if (host && host.parentNode) host.parentNode.removeChild(host);
+    document.removeEventListener("keydown", host.__zhihuEsc, true);
+    if (host.__zhihuResize) window.removeEventListener("resize", host.__zhihuResize);
+  }
+
+  async function handleGenerateClick(pageType, sourceEl) {
+    console.log("ZhihuCard: handleGenerateClick called, pageType=", pageType);
+    const shell = createModalShell();
+    await nextPaint();
+    if (!shell.host.isConnected) return;
+
+    // 列表页：按点击按钮对应的回答条目提取
+    let data = null;
+    if (sourceEl && sourceEl !== document && sourceEl.nodeType === 1) {
+      data = extractAnswerDataFromItem(sourceEl);
+      console.log("ZhihuCard: item extraction result=", data);
+    }
+
+    // 优先从 js-initialData 提取（更可靠），失败则用 DOM 选择器
+    if (!data) data = extractFromInitialData();
+    console.log("ZhihuCard: js-initialData result=", data);
+    if (!data) {
+      data = pageType === "article" ? extractArticleData() : extractAnswerData();
+      console.log("ZhihuCard: DOM extraction result=", data);
+    }
+
+    if (data && (!data.images || data.images.length === 0)) {
+      let contentEl = null;
+      if (sourceEl && sourceEl !== document && sourceEl.nodeType === 1) {
+        contentEl = sourceEl.querySelector(".RichContent-inner .RichText")
+          || sourceEl.querySelector(".RichContent-inner")
+          || sourceEl.querySelector(".RichContent")
+          || sourceEl.querySelector(".RichText");
+      } else {
+        contentEl = pageType === "article"
+          ? (document.querySelector(".RichText.ztext.Post-RichText") || document.querySelector(".Post-RichTextContainer") || document.querySelector(".RichText"))
+          : (document.querySelector(".RichContent-inner .RichText") || document.querySelector(".RichContent-inner") || document.querySelector(".RichText"));
+      }
+      if (contentEl) {
+        const domImages = extractImagesFromElement(contentEl);
+        if (domImages.length > 0) data.images = domImages;
+      }
+    }
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature] = await Promise.all([
+      getWatermarkSetting(),
+      getSavedStyle(),
+      getCustomBackgrounds(),
+      getHideStatsSetting(),
+      getHideTimeSetting(),
+      getSavedBackgroundId(),
+      getUiLangSetting(),
+      getWallpaperCardSettings(),
+      getParagraphGapSetting(),
+      getTitleFontSizeSetting(),
+      getBodyFontSizeSetting(),
+      getHideLinkSetting(),
+      getCustomAvatarSetting(),
+      getCustomNicknameSetting(),
+      getCustomSignatureSetting(),
+    ]);
+    if (!shell.host.isConnected) return;
+    await applyUiLang(uiLang);
+    if (!shell.host.isConnected) return;
+
+    finishModal(shell, data, {
+      watermark,
+      style,
+      customBgs,
+      hideStats,
+      hideTime,
+      wallpaperCard,
+      bgId: sanitizeBgId(savedBgId, customBgs),
+      pageType,
+      paragraphGap,
+      titleFontSize,
+      bodyFontSize,
+      hideLink,
+      customAvatar,
+      customNickname,
+      customSignature,
+    });
+  }
+
+  function nextPaint() {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  function createModalShell() {
+    const host = document.createElement("div");
+    host.id = "zhihucard-host";
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+
+    const styleEl = document.createElement("style");
+    styleEl.textContent = `
+      @keyframes zhihucard-spin { to { transform: rotate(360deg); } }
+      .zc-sidebar::-webkit-scrollbar { width: 6px; }
+      .zc-sidebar::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+      .zc-swatch { width: 28px; height: 28px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; transition: border-color 0.15s; }
+      .zc-swatch:hover { border-color: rgba(255,255,255,0.4); }
+      .zc-swatch.active { border-color: #6c5ce7; }
+      .zc-slider { -webkit-appearance: none; height: 4px; border-radius: 2px; background: #444; outline: none; }
+      .zc-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #6c5ce7; cursor: pointer; }
+      .zc-checkbox { accent-color: #6c5ce7; }
+    `;
+    shadow.appendChild(styleEl);
+
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      background: "rgba(0, 0, 0, 0.6)",
+      zIndex: "2147483647",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: '-apple-system, "PingFang SC", "Noto Sans SC", sans-serif',
+    });
+
+    // Two-column container
+    const container = document.createElement("div");
+    Object.assign(container.style, {
+      display: "flex",
+      width: "92vw",
+      maxWidth: "1080px",
+      height: "85vh",
+      maxHeight: "780px",
+      borderRadius: "16px",
+      overflow: "hidden",
+      boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+      background: "#1a1a2e",
+    });
+
+    // Left sidebar
+    const sidebar = document.createElement("div");
+    sidebar.className = "zc-sidebar";
+    Object.assign(sidebar.style, {
+      width: "280px",
+      minWidth: "280px",
+      background: "#1a1a2e",
+      color: "#e0e0e0",
+      display: "flex",
+      flexDirection: "column",
+      borderRight: "1px solid #333",
+      overflowY: "auto",
+    });
+
+    // Right preview area
+    const previewArea = document.createElement("div");
+    Object.assign(previewArea.style, {
+      flex: "1",
+      background: "#2d2d44",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "20px",
+      position: "relative",
+      overflow: "hidden",
+    });
+
+    const previewWrap = document.createElement("div");
+    Object.assign(previewWrap.style, {
+      width: "100%",
+      flex: "1",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      overflow: "auto",
+    });
+
+    const loadingWrap = document.createElement("div");
+    Object.assign(loadingWrap.style, {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "12px",
+      padding: "80px 40px",
+    });
+    const spinner = document.createElement("div");
+    Object.assign(spinner.style, {
+      width: "28px",
+      height: "28px",
+      borderRadius: "50%",
+      border: "3px solid #444",
+      borderTopColor: "#6c5ce7",
+      animation: "zhihucard-spin 0.8s linear infinite",
+    });
+    const loadingText = document.createElement("div");
+    Object.assign(loadingText.style, { fontSize: "14px", color: "#aaa" });
+    loadingText.textContent = t("cardGeneratingText");
+    loadingWrap.appendChild(spinner);
+    loadingWrap.appendChild(loadingText);
+    previewWrap.appendChild(loadingWrap);
+
+    previewArea.appendChild(previewWrap);
+    container.appendChild(sidebar);
+    container.appendChild(previewArea);
+    overlay.appendChild(container);
+    shadow.appendChild(overlay);
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal(host);
+    });
+    const escHandler = (e) => {
+      if (e.key === "Escape") closeModal(host);
+    };
+    host.__zhihuEsc = escHandler;
+    document.addEventListener("keydown", escHandler, true);
+
+    return { host, shadow, overlay, container, sidebar, previewArea, previewWrap };
+  }
+
+  function finishModal(shell, data, options) {
+    const { host, shadow, container, sidebar, previewArea, previewWrap } = shell;
+
+    const state = {
+      translatedText: null,
+      style: VALID_STYLES.includes(options.style) ? options.style : "white",
+      customBgs: options.customBgs || [],
+      hideStats: !!options.hideStats,
+      hideTime: !!options.hideTime,
+      hideLink: !!options.hideLink,
+      wallpaperCardTheme: (options.wallpaperCard && options.wallpaperCard.theme) || "white",
+      wallpaperCardOpacity: (options.wallpaperCard && options.wallpaperCard.opacity) || 100,
+      bgId: options.bgId || "aurora",
+      paragraphGap: !!options.paragraphGap,
+      titleFontSize: options.titleFontSize || 22,
+      bodyFontSize: options.bodyFontSize || 16,
+      customAvatar: options.customAvatar || "",
+      customNickname: options.customNickname || "",
+      customSignature: options.customSignature || "",
+      exportEl: null,
+    };
+
+    // ===== SIDEBAR BUILDER HELPERS =====
+    function sidebarSection(title) {
+      const sec = document.createElement("div");
+      Object.assign(sec.style, { padding: "16px 16px 8px" });
+      if (title) {
+        const h = document.createElement("div");
+        Object.assign(h.style, { fontSize: "11px", color: "#888", fontWeight: "600", letterSpacing: "0.05em", marginBottom: "10px", textTransform: "uppercase" });
+        h.textContent = title;
+        sec.appendChild(h);
+      }
+      sidebar.appendChild(sec);
+      return sec;
+    }
+
+    function sidebarCheckbox(labelText, checked, onChange) {
+      const label = document.createElement("label");
+      Object.assign(label.style, { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#ccc", cursor: "pointer", padding: "4px 0" });
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = checked; cb.className = "zc-checkbox";
+      const span = document.createElement("span");
+      span.textContent = labelText;
+      label.appendChild(cb); label.appendChild(span);
+      cb.addEventListener("change", () => { onChange(cb.checked); rebuildCard(); });
+      return label;
+    }
+
+    function sidebarSlider(labelText, value, min, max, onChange) {
+      const row = document.createElement("div");
+      Object.assign(row.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
+      const lbl = document.createElement("span");
+      Object.assign(lbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      lbl.textContent = labelText;
+      const slider = document.createElement("input");
+      slider.type = "range"; slider.min = String(min); slider.max = String(max); slider.step = "1";
+      slider.value = String(value); slider.className = "zc-slider";
+      Object.assign(slider.style, { flex: "1", cursor: "pointer" });
+      const val = document.createElement("span");
+      Object.assign(val.style, { fontSize: "12px", color: "#6c5ce7", minWidth: "36px", textAlign: "right" });
+      val.textContent = `${value}px`;
+      slider.addEventListener("input", () => { val.textContent = `${slider.value}px`; });
+      slider.addEventListener("change", () => { onChange(Number(slider.value)); rebuildCard(); });
+      row.appendChild(lbl); row.appendChild(slider); row.appendChild(val);
+      return row;
+    }
+
+    // ===== SIDEBAR: COLOR SCHEME =====
+    const PALETTE_COLORS = {
+      white: ["#ffffff", "#121212", "#0066ff"],
+      dark: ["#1a1a1a", "#f0f0f0", "#4d94ff"],
+      warm: ["#FAF3EB", "#5D4037", "#8D6E63"],
+      cool: ["#F8FAFC", "#0F172A", "#3B82F6"],
+      paper: ["#FDF6E3", "#073642", "#CB4B16"],
+      minimal: ["#FFFFFF", "#111827", "#10B981"],
+      cherry: ["#FFF5F7", "#E91E63", "#F48FB1"],
+      tianya: ["#FBF7F0", "#6D4C41", "#8D6E63"],
+      retro: ["#EDE8DF", "#4A3A35", "#7B9E87"],
+      matcha: ["#F5F0E8", "#2E4A2B", "#6B8F5E"],
+      chocolate: ["#F5EDE0", "#5C2E26", "#D4829A"],
+      blueberry: ["#EDE9E2", "#1E3050", "#5B8BA0"],
+      redTeal: ["#F0E6D8", "#B71C1C", "#1B5E4B"],
+    };
+    const STYLE_LABELS = {
+      white: t("styleWhite"), dark: t("styleDark"), warm: t("styleWarm"),
+      cool: t("styleCool"), paper: t("stylePaper"), minimal: t("styleMinimal"),
+      cherry: t("styleCherry"), tianya: t("styleTianya"), retro: t("styleRetro"),
+      matcha: t("styleMatcha"), chocolate: t("styleChocolate"),
+      blueberry: t("styleBlueberry"), redTeal: t("styleRedTeal"),
+      wallpaper: t("styleWallpaper"),
+    };
+
+    {
+      const sec = sidebarSection(t("styleLabel"));
+      const grid = document.createElement("div");
+      Object.assign(grid.style, { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" });
+
+      VALID_STYLES.forEach((key) => {
+        const card = document.createElement("div");
+        const active = state.style === key;
+        Object.assign(card.style, {
+          padding: "6px", borderRadius: "8px", cursor: "pointer",
+          border: active ? "2px solid #6c5ce7" : "2px solid transparent",
+          background: active ? "rgba(108,92,231,0.1)" : "transparent",
+          transition: "all 0.15s",
+        });
+        const colors = PALETTE_COLORS[key] || ["#fff", "#333", "#0066ff"];
+        const swatches = document.createElement("div");
+        Object.assign(swatches.style, { display: "flex", gap: "3px", marginBottom: "4px" });
+        colors.forEach((c) => {
+          const s = document.createElement("div");
+          Object.assign(s.style, { width: "18px", height: "18px", borderRadius: "4px", background: c, border: "1px solid rgba(255,255,255,0.15)" });
+          swatches.appendChild(s);
+        });
+        const lbl = document.createElement("div");
+        Object.assign(lbl.style, { fontSize: "10px", color: "#aaa", textAlign: "center", lineHeight: "1.2" });
+        lbl.textContent = STYLE_LABELS[key];
+        card.appendChild(swatches); card.appendChild(lbl);
+        card.addEventListener("click", () => {
+          if (state.style === key) return;
+          state.style = key;
+          saveStyle(key);
+          updateBgControlsVisibility();
+          sidebar.querySelectorAll("[data-zc-style]").forEach((el) => {
+            el.style.borderColor = el.dataset.zcStyle === key ? "#6c5ce7" : "transparent";
+            el.style.background = el.dataset.zcStyle === key ? "rgba(108,92,231,0.1)" : "transparent";
+          });
+          rebuildCard();
+        });
+        card.dataset.zcStyle = key;
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+    }
+
+    // wallpaper controls
+    const bgControls = document.createElement("div");
+    Object.assign(bgControls.style, { display: "none", alignItems: "center", gap: "6px", flexWrap: "wrap", marginTop: "8px" });
+
+    const cardControls = document.createElement("div");
+    Object.assign(cardControls.style, { display: "none", alignItems: "center", gap: "6px", flexWrap: "wrap", marginTop: "8px" });
+
+    function updateBgControlsVisibility() {
+      const vis = state.style === "wallpaper" ? "flex" : "none";
+      bgControls.style.display = vis;
+      cardControls.style.display = vis;
+    }
+
+    // wallpaper bg picker
+    let bgExpanded = false;
+    function buildBgThumb(item, allowDelete) {
+      const wrap = document.createElement("div");
+      Object.assign(wrap.style, { position: "relative", flexShrink: "0" });
+      const thumb = document.createElement("button");
+      thumb.type = "button"; thumb.title = item.label;
+      const selected = state.bgId === item.id;
+      Object.assign(thumb.style, {
+        width: "24px", height: "24px", borderRadius: "50%", display: "block",
+        backgroundImage: `url("${item.url}")`, backgroundSize: "cover", backgroundPosition: "center",
+        border: selected ? "2px solid #6c5ce7" : "2px solid transparent",
+        boxShadow: selected ? "none" : "0 0 0 1px #555", padding: "0", cursor: "pointer",
+      });
+      thumb.addEventListener("click", () => {
+        if (state.bgId === item.id) return;
+        state.bgId = item.id; saveBackgroundId(item.id);
+        renderBgThumbnails(); rebuildCard();
+      });
+      wrap.appendChild(thumb);
+      if (allowDelete) {
+        const del = document.createElement("button");
+        del.type = "button"; del.title = t("deleteBgTitle"); del.textContent = "\u00d7";
+        Object.assign(del.style, {
+          position: "absolute", top: "-4px", right: "-4px", width: "14px", height: "14px",
+          borderRadius: "50%", border: "1px solid #333", background: "#666", color: "#fff",
+          fontSize: "10px", lineHeight: "12px", textAlign: "center", padding: "0", cursor: "pointer",
+        });
+        del.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const idx = parseInt(item.id.slice(7), 10);
+          const wasSelected = state.bgId === item.id;
+          const next = state.customBgs.slice(); next.splice(idx, 1);
+          state.customBgs = next; await setCustomBackgrounds(next);
+          if (wasSelected) { state.bgId = "aurora"; saveBackgroundId("aurora"); }
+          renderBgThumbnails(); rebuildCard();
+        });
+        wrap.appendChild(del);
+      }
+      return wrap;
+    }
+    function renderBgThumbnails() {
+      bgControls.innerHTML = "";
+      const items = BUILTIN_BACKGROUNDS.map((b) => ({ id: b.id, label: b.name, url: builtinBackgroundUrl(b) }));
+      items.forEach((item) => bgControls.appendChild(buildBgThumb(item, false)));
+    }
+    renderBgThumbnails();
+
+    {
+      const sec = sidebar.appendChild(document.createElement("div"));
+      Object.assign(sec.style, { padding: "0 16px 8px" });
+      sec.appendChild(bgControls);
+    }
+
+    // wallpaper card theme + opacity
+    {
+      const sec = sidebar.appendChild(document.createElement("div"));
+      Object.assign(sec.style, { padding: "0 16px 8px" });
+      sec.appendChild(cardControls);
+      const lbl = document.createElement("span");
+      Object.assign(lbl.style, { fontSize: "12px", color: "#888" });
+      lbl.textContent = t("cardColorLabel");
+      cardControls.appendChild(lbl);
+      VALID_CARD_THEMES.forEach((key) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = key === "white" ? t("styleWhite") : t("styleDark");
+        Object.assign(btn.style, {
+          border: "none", borderRadius: "4px", padding: "3px 8px",
+          fontSize: "11px", fontWeight: "600", cursor: "pointer",
+          background: state.wallpaperCardTheme === key ? "#6c5ce7" : "#333",
+          color: state.wallpaperCardTheme === key ? "#fff" : "#aaa",
+        });
+        btn.addEventListener("click", () => {
+          state.wallpaperCardTheme = key;
+          saveWallpaperCardSettings(key, state.wallpaperCardOpacity);
+          rebuildCard();
+        });
+        cardControls.appendChild(btn);
+      });
+      const opRow = document.createElement("div");
+      Object.assign(opRow.style, { display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" });
+      const opLbl = document.createElement("span");
+      Object.assign(opLbl.style, { fontSize: "12px", color: "#888" });
+      opLbl.textContent = t("opacityLabel");
+      const opSlider = document.createElement("input");
+      opSlider.type = "range"; opSlider.min = "30"; opSlider.max = "100"; opSlider.step = "5";
+      opSlider.value = String(state.wallpaperCardOpacity); opSlider.className = "zc-slider";
+      Object.assign(opSlider.style, { width: "80px", cursor: "pointer" });
+      const opVal = document.createElement("span");
+      Object.assign(opVal.style, { fontSize: "11px", color: "#6c5ce7" });
+      opVal.textContent = `${state.wallpaperCardOpacity}%`;
+      opSlider.addEventListener("change", () => {
+        state.wallpaperCardOpacity = clampCardOpacity(opSlider.value);
+        opVal.textContent = `${state.wallpaperCardOpacity}%`;
+        saveWallpaperCardSettings(state.wallpaperCardTheme, state.wallpaperCardOpacity);
+        rebuildCard();
+      });
+      opRow.appendChild(opLbl); opRow.appendChild(opSlider); opRow.appendChild(opVal);
+      cardControls.appendChild(opRow);
+    }
+    updateBgControlsVisibility();
+
+    // ===== SIDEBAR: OPTIONS =====
+    {
+      const sec = sidebarSection(t("optionsLabel"));
+      sec.appendChild(sidebarCheckbox(t("hideStatsLabel"), state.hideStats, (v) => { state.hideStats = v; saveHideStats(v); }));
+      sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
+      sec.appendChild(sidebarCheckbox(t("hideLinkLabel"), state.hideLink, (v) => { state.hideLink = v; saveHideLink(v); }));
+      sec.appendChild(sidebarCheckbox(t("paragraphGapLabel"), state.paragraphGap, (v) => { state.paragraphGap = v; saveParagraphGap(v); }));
+    }
+
+    // ===== SIDEBAR: FONT SIZE =====
+    {
+      const sec = sidebarSection(t("fontSizeLabel"));
+      sec.appendChild(sidebarSlider(t("titleFontSizeLabel"), state.titleFontSize, 14, 72, (v) => { state.titleFontSize = v; saveTitleFontSize(v); }));
+      sec.appendChild(sidebarSlider(t("bodyFontSizeLabel"), state.bodyFontSize, 12, 48, (v) => { state.bodyFontSize = v; saveBodyFontSize(v); }));
+    }
+
+    // ===== SIDEBAR: CUSTOM PROFILE =====
+    {
+      const sec = sidebarSection(t("customProfileLabel"));
+
+      const nickRow = document.createElement("div");
+      Object.assign(nickRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
+      const nickLbl = document.createElement("span");
+      Object.assign(nickLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      nickLbl.textContent = t("customNicknameLabel");
+      const nickInput = document.createElement("input");
+      nickInput.type = "text";
+      nickInput.value = state.customNickname;
+      nickInput.placeholder = t("customNicknamePlaceholder");
+      Object.assign(nickInput.style, {
+        flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
+        borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
+      });
+      nickInput.addEventListener("change", () => {
+        state.customNickname = nickInput.value;
+        saveCustomNickname(state.customNickname);
+        rebuildCard();
+      });
+      nickRow.appendChild(nickLbl); nickRow.appendChild(nickInput);
+      sec.appendChild(nickRow);
+
+      const sigRow = document.createElement("div");
+      Object.assign(sigRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
+      const sigLbl = document.createElement("span");
+      Object.assign(sigLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      sigLbl.textContent = t("customSignatureLabel");
+      const sigInput = document.createElement("input");
+      sigInput.type = "text";
+      sigInput.value = state.customSignature;
+      sigInput.placeholder = t("customSignaturePlaceholder");
+      Object.assign(sigInput.style, {
+        flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
+        borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
+      });
+      sigInput.addEventListener("change", () => {
+        state.customSignature = sigInput.value;
+        saveCustomSignature(state.customSignature);
+        rebuildCard();
+      });
+      sigRow.appendChild(sigLbl); sigRow.appendChild(sigInput);
+      sec.appendChild(sigRow);
+
+      const avatarRow = document.createElement("div");
+      Object.assign(avatarRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0", marginTop: "4px", flexWrap: "wrap" });
+      const avatarLbl = document.createElement("span");
+      Object.assign(avatarLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      avatarLbl.textContent = t("customAvatarLabel");
+
+      const preview = document.createElement("img");
+      preview.alt = "";
+      Object.assign(preview.style, {
+        width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover",
+        background: "#2d2d44", border: "1px solid #444", flexShrink: "0",
+      });
+      function paintAvatarPreview() {
+        if (state.customAvatar) preview.src = state.customAvatar;
+        else preview.removeAttribute("src");
+      }
+      paintAvatarPreview();
+
+      const uploadBtn = document.createElement("label");
+      uploadBtn.textContent = t("customAvatarUpload");
+      Object.assign(uploadBtn.style, {
+        cursor: "pointer", fontSize: "12px", fontWeight: "600", color: "#fff",
+        background: "#6c5ce7", borderRadius: "6px", padding: "6px 10px", flexShrink: "0",
+      });
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/*";
+      fileInput.style.display = "none";
+      uploadBtn.appendChild(fileInput);
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        try {
+          const dataUrl = await resizeImageFileToDataUrl(file);
+          state.customAvatar = dataUrl;
+          saveCustomAvatar(dataUrl);
+          paintAvatarPreview();
+          rebuildCard();
+        } catch (_) {
+          // ignore upload failures
+        }
+      });
+
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.textContent = t("customAvatarClear");
+      Object.assign(clearBtn.style, {
+        cursor: "pointer", fontSize: "12px", fontWeight: "600", color: "#aaa",
+        background: "transparent", border: "1px solid #555", borderRadius: "6px",
+        padding: "6px 10px", flexShrink: "0",
+      });
+      clearBtn.addEventListener("click", () => {
+        state.customAvatar = "";
+        saveCustomAvatar("");
+        paintAvatarPreview();
+        rebuildCard();
+      });
+
+      avatarRow.appendChild(avatarLbl);
+      avatarRow.appendChild(preview);
+      avatarRow.appendChild(uploadBtn);
+      avatarRow.appendChild(clearBtn);
+      sec.appendChild(avatarRow);
+    }
+
+    // ===== SIDEBAR: TRANSLATE =====
+    {
+      const sec = sidebarSection();
+      const statusText = document.createElement("span");
+      Object.assign(statusText.style, { fontSize: "11px", color: "#888" });
+      const label = document.createElement("label");
+      Object.assign(label.style, { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#ccc", cursor: "pointer", padding: "4px 0" });
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox"; checkbox.className = "zc-checkbox";
+      const span = document.createElement("span");
+      span.textContent = t("translateLabel");
+      label.appendChild(checkbox); label.appendChild(span);
+      checkbox.addEventListener("change", async () => {
+        if (checkbox.checked) {
+          statusText.textContent = t("translatingText");
+          try {
+            const res = await chrome.runtime.sendMessage({ type: "translate", text: data.text, target: translateTargetLang(data.text) });
+            if (res && res.ok) { state.translatedText = res.text; statusText.textContent = ""; }
+            else { statusText.textContent = t("translateFailedText"); checkbox.checked = false; }
+          } catch (_) { statusText.textContent = t("translateFailedText"); checkbox.checked = false; }
+        } else { state.translatedText = null; statusText.textContent = ""; }
+        rebuildCard();
+      });
+      sec.appendChild(label); sec.appendChild(statusText);
+    }
+
+    // ===== SIDEBAR: ACTIONS =====
+    {
+      const sec = sidebar.appendChild(document.createElement("div"));
+      Object.assign(sec.style, { padding: "16px", marginTop: "auto" });
+      const row = document.createElement("div");
+      Object.assign(row.style, { display: "flex", gap: "8px", flexWrap: "wrap" });
+
+      function makeActionBtn(text, primary) {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.textContent = text;
+        Object.assign(btn.style, {
+          border: primary ? "none" : "1px solid #555",
+          background: primary ? "#6c5ce7" : "transparent",
+          color: primary ? "#fff" : "#ccc",
+          borderRadius: "8px", padding: "8px 14px",
+          fontSize: "13px", fontWeight: "600", cursor: "pointer", flex: "1",
+        });
+        return btn;
+      }
+
+      const copyBtn = makeActionBtn(t("copyImageButton"), true);
+      copyBtn.addEventListener("click", async () => {
+        copyBtn.disabled = true; copyBtn.textContent = t("downloadGeneratingText");
+        try {
+          const blobPromise = window.ZhihuCard.renderCardToPng(state.exportEl, 2).then((r) => r.blob);
+          let items;
+          try { items = [new ClipboardItem({ "image/png": blobPromise })]; }
+          catch (_) { items = [new ClipboardItem({ "image/png": await blobPromise })]; }
+          await navigator.clipboard.write(items);
+          copyBtn.textContent = t("copiedText");
+        } catch (e) { copyBtn.textContent = t("copyFailedText"); }
+        setTimeout(() => { copyBtn.textContent = t("copyImageButton"); copyBtn.disabled = false; }, 1500);
+      });
+
+      const downloadBtn = makeActionBtn(t("downloadPngButton"), false);
+      downloadBtn.addEventListener("click", async () => {
+        downloadBtn.textContent = t("downloadGeneratingText"); downloadBtn.disabled = true;
+        try {
+          const { dataUrl } = await window.ZhihuCard.renderCardToPng(state.exportEl, 2);
+          const a = document.createElement("a"); a.href = dataUrl; a.download = buildFilename(data.author); a.click();
+        } catch (e) { downloadBtn.textContent = t("renderFailedText"); setTimeout(() => { downloadBtn.textContent = t("downloadPngButton"); downloadBtn.disabled = false; }, 1500); return; }
+        downloadBtn.textContent = t("downloadPngButton"); downloadBtn.disabled = false;
+      });
+
+      const closeBtn = makeActionBtn(t("closeButton"), false);
+      closeBtn.addEventListener("click", () => closeModal(host));
+
+      row.appendChild(copyBtn); row.appendChild(downloadBtn); row.appendChild(closeBtn);
+      sec.appendChild(row);
+    }
+
+    // ===== SIDEBAR: LANGUAGE TOGGLE =====
+    {
+      const sec = sidebar.appendChild(document.createElement("div"));
+      Object.assign(sec.style, { padding: "8px 16px 16px" });
+      const langBtn = document.createElement("button");
+      langBtn.type = "button";
+      langBtn.textContent = uiLanguageIsChinese() ? "EN" : "\u4e2d";
+      Object.assign(langBtn.style, {
+        border: "1px solid #444", background: "transparent", color: "#aaa",
+        borderRadius: "4px", padding: "4px 10px", fontSize: "12px", fontWeight: "600", cursor: "pointer",
+      });
+      langBtn.addEventListener("click", () => {
+        saveUiLang(uiLanguageIsChinese() ? "en" : "zh");
+        closeModal(host); handleGenerateClick(options.pageType);
+      });
+      sec.appendChild(langBtn);
+    }
+
+    // ===== PREVIEW =====
+    let updateScrollHint = () => {};
+
+    async function buildExportEl(cardData, cardOptions) {
+      const theme = state.style === "wallpaper" ? state.wallpaperCardTheme : state.style;
+      const card = window.ZhihuCard.buildCard(cardData, Object.assign({ theme }, cardOptions));
+      await waitForImages(card);
+      window.ZhihuCard.finalizeMediaLayout(card);
+      if (state.style !== "wallpaper") return card;
+      if (state.wallpaperCardOpacity < 100) {
+        const alpha = state.wallpaperCardOpacity / 100;
+        card.style.backgroundColor = state.wallpaperCardTheme === "dark" ? `rgba(0,0,0,${alpha})` : `rgba(255,255,255,${alpha})`;
+      }
+      const stage = document.createElement("div");
+      Object.assign(stage.style, { position: "fixed", left: "-9999px", top: "0" });
+      stage.appendChild(card); document.body.appendChild(stage);
+      const bgUrl = resolveBackgroundUrl(state.bgId, state.customBgs);
+      const frame = window.ZhihuCard.buildWallpaperFrame(card, bgUrl);
+      document.body.removeChild(stage);
+      return frame;
+    }
+
+    function renderScaledPreview(exportEl, viewport) {
+      const previewClone = exportEl.cloneNode(true);
+      const probe = document.createElement("div");
+      Object.assign(probe.style, { position: "fixed", left: "-9999px", top: "0" });
+      probe.appendChild(previewClone); document.body.appendChild(probe);
+      const rect = previewClone.getBoundingClientRect();
+      const naturalWidth = rect.width, naturalHeight = rect.height;
+      document.body.removeChild(probe);
+      const viewportRect = viewport.getBoundingClientRect();
+      const scale = Math.min((viewportRect.width - 40) / naturalWidth, (viewportRect.height - 40) / naturalHeight, 1);
+      const scaledWrapper = document.createElement("div");
+      Object.assign(scaledWrapper.style, {
+        width: `${naturalWidth * scale}px`, height: `${naturalHeight * scale}px`,
+        flexShrink: "0", cursor: "zoom-in", overflow: "hidden",
+      });
+      Object.assign(previewClone.style, { transform: `scale(${scale})`, transformOrigin: "top left" });
+      scaledWrapper.appendChild(previewClone);
+      scaledWrapper.addEventListener("click", () => openZoomOverlay(exportEl));
+      viewport.appendChild(scaledWrapper);
+    }
+
+    function openZoomOverlay(exportEl) {
+      document.removeEventListener("keydown", host.__zhihuEsc, true);
+      const zoomHost = document.createElement("div");
+      Object.assign(zoomHost.style, {
+        position: "fixed", inset: "0", background: "rgba(0,0,0,0.85)",
+        zIndex: "2147483647", display: "flex", justifyContent: "center",
+        alignItems: "flex-start", overflow: "auto", cursor: "zoom-out", padding: "40px", boxSizing: "border-box",
+      });
+      const zoomClone = exportEl.cloneNode(true);
+      zoomClone.style.cursor = "zoom-out"; zoomClone.style.flexShrink = "0";
+      zoomHost.appendChild(zoomClone);
+      function close() {
+        if (zoomHost.parentNode) zoomHost.parentNode.removeChild(zoomHost);
+        document.removeEventListener("keydown", escHandler, true);
+        document.addEventListener("keydown", host.__zhihuEsc, true);
+      }
+      zoomHost.addEventListener("click", close);
+      const escHandler = (e) => { if (e.key === "Escape") close(); };
+      document.addEventListener("keydown", escHandler, true);
+      shadow.appendChild(zoomHost);
+    }
+
+    let rebuildSeq = 0;
+    async function rebuildCard() {
+      const seq = ++rebuildSeq;
+      const cardData = Object.assign({}, data, {
+        translatedText: state.translatedText,
+        author: (state.customNickname || "").trim() || data.author,
+        avatar: state.customAvatar || data.avatar,
+        authorHeadline: (state.customSignature || "").trim() || data.authorHeadline,
+      });
+      const cardOptions = {
+        watermark: options.watermark, hideStats: state.hideStats,
+        hideTime: state.hideTime, hideLink: state.hideLink,
+        paragraphGap: state.paragraphGap, titleFontSize: state.titleFontSize,
+        bodyFontSize: state.bodyFontSize, locale: effectiveLocale(),
+      };
+      const exportEl = await buildExportEl(cardData, cardOptions);
+      if (seq !== rebuildSeq || !host.isConnected) return;
+      previewWrap.innerHTML = "";
+      state.exportEl = exportEl;
+      host.__zhihuExportEl = state.exportEl;
+      const viewport = document.createElement("div");
+      Object.assign(viewport.style, {
+        width: "100%", height: "100%", display: "flex",
+        alignItems: "center", justifyContent: "center",
+      });
+      previewWrap.appendChild(viewport);
+      renderScaledPreview(state.exportEl, viewport);
+    }
+    rebuildCard();
+  }
+})();
