@@ -1,6 +1,6 @@
 # ZhihuCard（中文）
 
-由 [X榜单](https://xbangdan.com) 出品 · 一键把知乎文章/回答变成精美分享卡片。
+由 @inwelove 出品 · 一键把知乎文章/回答变成精美分享卡片。
 
 ## 功能
 
@@ -57,7 +57,7 @@ MIT
 
 # ZhihuCard
 
-Built by [X榜单 (xbangdan.com)](https://xbangdan.com) · Turn any Zhihu article or answer into a beautiful, shareable card.
+Built by@inwelove · Turn any Zhihu article or answer into a beautiful, shareable card.
 
 ## Features
 
