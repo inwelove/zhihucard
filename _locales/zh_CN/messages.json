@@ -81,5 +81,7 @@
   "settingsLabel": { "message": "设置" },
   "projectLabel": { "message": "项目" },
   "githubRepoLabel": { "message": "GitHub 仓库" },
-  "feedbackLabel": { "message": "反馈问题" }
+  "feedbackLabel": { "message": "反馈问题" },
+  "followAuthorLabel": { "message": "关注作者" },
+  "followAuthorText": { "message": "@inwelove · 在 X 上关注" }
 }

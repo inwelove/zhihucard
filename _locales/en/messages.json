@@ -81,5 +81,7 @@
   "settingsLabel": { "message": "Settings" },
   "projectLabel": { "message": "Project" },
   "githubRepoLabel": { "message": "GitHub repository" },
-  "feedbackLabel": { "message": "Report an issue" }
+  "feedbackLabel": { "message": "Report an issue" },
+  "followAuthorLabel": { "message": "Follow the author" },
+  "followAuthorText": { "message": "@inwelove · Follow on X" }
 }
