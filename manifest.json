@@ -3,7 +3,7 @@
   "name": "ZhihuCard",
   "default_locale": "zh_CN",
   "description": "__MSG_extDescription__",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -27,18 +27,26 @@
         "https://www.zhihu.com/question/*",
         "https://www.zhihu.com/answer/*"
       ],
-      "js": ["card.js", "render.js", "content.js"],
+      "js": [
+        "card.js",
+        "render.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage"],
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
     "https://*.zhimg.com/*",
     "https://translate.googleapis.com/*"
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/*"],
+      "resources": [
+        "assets/*"
+      ],
       "matches": [
         "https://zhuanlan.zhihu.com/*",
         "https://www.zhihu.com/*"
