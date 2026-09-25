@@ -76,6 +76,7 @@
   "statsRangeHint": { "message": "左边填区间（点赞单位万），点随机一键生成" },
   "watermarkTextLabel": { "message": "水印文字" },
   "watermarkOpacityLabel": { "message": "水印透明度" },
+  "watermarkDensityLabel": { "message": "水印密度" },
   "presetsLabel": { "message": "预设用户" },
   "presetSaveBtn": { "message": "保存当前" },
   "presetHint": { "message": "填好昵称/签名/头像点保存，点头像一键切换，右键删除" },

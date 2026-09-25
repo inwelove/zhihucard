@@ -76,6 +76,7 @@
   "statsRangeHint": { "message": "Set a range on the left (likes in 10k), then hit Random" },
   "watermarkTextLabel": { "message": "Watermark text" },
   "watermarkOpacityLabel": { "message": "Watermark opacity" },
+  "watermarkDensityLabel": { "message": "Watermark density" },
   "presetsLabel": { "message": "Saved profiles" },
   "presetSaveBtn": { "message": "Save current" },
   "presetHint": { "message": "Fill nickname/signature/avatar then save; click a circle to switch, right-click to remove" },

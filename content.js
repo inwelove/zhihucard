@@ -65,6 +65,7 @@
     statsRangeHint: "左边填区间（点赞单位万），点随机一键生成",
     watermarkTextLabel: "水印文字",
     watermarkOpacityLabel: "水印透明度",
+    watermarkDensityLabel: "水印密度",
     presetsLabel: "预设用户",
     presetSaveBtn: "保存当前",
     presetHint: "填好昵称/签名/头像点保存，点头像一键切换，右键删除",
@@ -814,10 +815,14 @@
   async function getWatermarkStyleSetting() {
     const text = await loadSetting("watermarkText", "ZhihuCard");
     const opacity = await loadSetting("watermarkOpacity", 14);
+    const density = await loadSetting("watermarkDensity", 100);
     let op = Number(opacity);
     if (!isFinite(op)) op = 14;
     op = Math.min(60, Math.max(2, Math.round(op)));
-    return { text: typeof text === "string" ? text : "ZhihuCard", opacity: op };
+    let de = Number(density);
+    if (!isFinite(de)) de = 100;
+    de = Math.min(220, Math.max(40, Math.round(de)));
+    return { text: typeof text === "string" ? text : "ZhihuCard", opacity: op, density: de };
   }
   function saveWatermarkText(value) {
     storageSet({ watermarkText: typeof value === "string" ? value : "ZhihuCard" });
@@ -826,6 +831,11 @@
     let op = Number(value);
     if (!isFinite(op)) op = 14;
     storageSet({ watermarkOpacity: Math.min(60, Math.max(2, Math.round(op))) });
+  }
+  function saveWatermarkDensity(value) {
+    let de = Number(value);
+    if (!isFinite(de)) de = 100;
+    storageSet({ watermarkDensity: Math.min(220, Math.max(40, Math.round(de))) });
   }
 
   const MAX_PROFILE_PRESETS = 5;
@@ -1289,6 +1299,7 @@
       likesCfg: statsCfg,
       watermarkText: watermarkStyle.text,
       watermarkOpacity: watermarkStyle.opacity,
+      watermarkDensity: watermarkStyle.density,
       profilePresets,
     });
   }
@@ -1437,6 +1448,7 @@
       watermark: !!options.watermark,
       watermarkText: options.watermarkText || "ZhihuCard",
       watermarkOpacity: options.watermarkOpacity || 14,
+      watermarkDensity: options.watermarkDensity || 100,
       presets: options.profilePresets || [],
       wallpaperCardTheme: (options.wallpaperCard && options.wallpaperCard.theme) || "white",
       wallpaperCardOpacity: (options.wallpaperCard && options.wallpaperCard.opacity) || 100,
@@ -1467,6 +1479,37 @@
           if (state.watermarkCheckboxEl) state.watermarkCheckboxEl.checked = v;
           dirty = true;
         }
+      }
+      if (changes.watermarkText) {
+        const v = typeof changes.watermarkText.newValue === "string" ? changes.watermarkText.newValue : "ZhihuCard";
+        if (v !== state.watermarkText) {
+          state.watermarkText = v;
+          if (state.wmTextEl) state.wmTextEl.value = v;
+          dirty = true;
+        }
+      }
+      if (changes.watermarkOpacity) {
+        const v = Number(changes.watermarkOpacity.newValue);
+        if (isFinite(v) && v !== state.watermarkOpacity) {
+          state.watermarkOpacity = v;
+          if (state.wmOpSlider) state.wmOpSlider.value = String(v);
+          if (state.wmOpVal) state.wmOpVal.textContent = `${v}%`;
+          dirty = true;
+        }
+      }
+      if (changes.watermarkDensity) {
+        const v = Number(changes.watermarkDensity.newValue);
+        if (isFinite(v) && v !== state.watermarkDensity) {
+          state.watermarkDensity = v;
+          if (state.wmDenSlider) state.wmDenSlider.value = String(v);
+          if (state.wmDenVal) state.wmDenVal.textContent = `${v}%`;
+          dirty = true;
+        }
+      }
+      if (changes.profilePresets) {
+        const list = Array.isArray(changes.profilePresets.newValue) ? changes.profilePresets.newValue : [];
+        state.presets = list.slice(0, MAX_PROFILE_PRESETS);
+        if (state.renderPresetsFn) state.renderPresetsFn();
       }
       if (changes.customNickname) {
         const v = typeof changes.customNickname.newValue === "string" ? changes.customNickname.newValue : "";
@@ -1751,6 +1794,7 @@
         clearTimeout(wmTextTimer);
         wmTextTimer = setTimeout(() => { saveWatermarkText(state.watermarkText); rebuildCard(); }, 400);
       });
+      state.wmTextEl = wmTextInput;
       wmTextRow.appendChild(wmTextLbl); wmTextRow.appendChild(wmTextInput);
       sec.appendChild(wmTextRow);
 
@@ -1775,6 +1819,30 @@
       });
       wmOpRow.appendChild(wmOpLbl); wmOpRow.appendChild(wmOpSlider); wmOpRow.appendChild(wmOpVal);
       sec.appendChild(wmOpRow);
+      state.wmOpSlider = wmOpSlider; state.wmOpVal = wmOpVal;
+
+      const wmDenRow = document.createElement("div");
+      Object.assign(wmDenRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0" });
+      const wmDenLbl = document.createElement("span");
+      Object.assign(wmDenLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      wmDenLbl.textContent = t("watermarkDensityLabel");
+      const wmDenSlider = document.createElement("input");
+      wmDenSlider.type = "range"; wmDenSlider.min = "40"; wmDenSlider.max = "220"; wmDenSlider.step = "5";
+      wmDenSlider.value = String(state.watermarkDensity); wmDenSlider.className = "zc-slider";
+      Object.assign(wmDenSlider.style, { flex: "1", cursor: "pointer" });
+      const wmDenVal = document.createElement("span");
+      Object.assign(wmDenVal.style, { fontSize: "11px", color: "#6c5ce7", minWidth: "34px", textAlign: "right" });
+      wmDenVal.textContent = `${state.watermarkDensity}%`;
+      wmDenSlider.addEventListener("input", () => { wmDenVal.textContent = `${wmDenSlider.value}%`; });
+      wmDenSlider.addEventListener("change", () => {
+        state.watermarkDensity = Math.min(220, Math.max(40, Number(wmDenSlider.value) || 100));
+        wmDenVal.textContent = `${state.watermarkDensity}%`;
+        saveWatermarkDensity(state.watermarkDensity);
+        rebuildCard();
+      });
+      wmDenRow.appendChild(wmDenLbl); wmDenRow.appendChild(wmDenSlider); wmDenRow.appendChild(wmDenVal);
+      sec.appendChild(wmDenRow);
+      state.wmDenSlider = wmDenSlider; state.wmDenVal = wmDenVal;
 
       sec.appendChild(sidebarCheckbox(t("hideStatsLabel"), state.hideStats, (v) => { state.hideStats = v; saveHideStats(v); }));
       sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
@@ -2181,6 +2249,7 @@
         });
       }
       renderPresets();
+      state.renderPresetsFn = renderPresets;
 
       const savePresetBtn = document.createElement("button");
       savePresetBtn.type = "button";
@@ -2389,6 +2458,7 @@
         watermark: state.watermark,
         watermarkText: state.watermarkText,
         watermarkOpacity: state.watermarkOpacity,
+        watermarkDensity: state.watermarkDensity,
         hideStats: state.hideStats,
         hideTime: state.hideTime, hideLink: state.hideLink,
         paragraphGap: state.paragraphGap, titleFontSize: state.titleFontSize,
