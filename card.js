@@ -538,20 +538,28 @@
     // ----- body text -----
     const bodyFontSize = options.bodyFontSize || 16;
     const paragraphGap = !!options.paragraphGap;
+    // 段落间距：每个回车（段落）后补一个空行，与下文隔开
+    function withParagraphGap(text) {
+      return String(text || "")
+        .replace(/[ \t]*\r?\n[ \t]*/g, "\n\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/^\n+|\n+$/g, "");
+    }
     const body = el("div", { marginBottom: "16px" });
     const textBlock = el("div", {
       fontSize: `${bodyFontSize}px`,
-      lineHeight: paragraphGap ? "2.0" : "1.75",
+      lineHeight: "1.75",
       whiteSpace: "pre-wrap",
       wordBreak: "break-word",
       color: palette.text,
     });
     if (data.translatedText) {
       textBlock.dataset.zhihucardRole = "text-translated";
-      textBlock.textContent = data.translatedText;
+      textBlock.textContent = paragraphGap ? withParagraphGap(data.translatedText) : data.translatedText;
     } else {
       textBlock.dataset.zhihucardRole = "text-original";
-      textBlock.textContent = data.text || "";
+      const rawText = data.text || "";
+      textBlock.textContent = paragraphGap ? withParagraphGap(rawText) : rawText;
     }
     body.appendChild(textBlock);
     card.appendChild(body);

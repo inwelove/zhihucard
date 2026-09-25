@@ -12,6 +12,7 @@
 - 一键翻译（谷歌翻译），方向自动：外语翻成中文，中文翻成外语
 - 图片完整显示：单图按原始比例，双图并排，三张以上网格布局
 - 可隐藏互动数据和时间
+- 「段落间距」：勾选后每个回车（段落）后补一个空行，与下一段隔开
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
 - 赞同数可手动改写：设定随机范围（默认 3–5 万），点「随机」生成，点「还原」恢复原数据
 - 「互动数据」整块可编辑：点赞／评论／收藏／喜欢每项都能手填数字，也能各设一个随机区间（点赞单位万），「随机」按各自区间一键全部生成、「还原」全部恢复；勾选「打开面板时自动随机一次」，每次打开面板自动按区间重掷
@@ -76,6 +77,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - One-click translation (via Google Translate), direction-aware
 - Images display in full layout (single, side-by-side, or grid)
 - Optionally hide the engagement stats and the timestamp
+- "Paragraph spacing": when checked, every paragraph (line break) gets a blank line before the next one
 - Shows a "N people upvoted this answer" line under the author
 - Overwrite the upvote count — set a random range (default 30k–50k), hit Random, or restore the real number
 - The whole engagement stats block is editable: each metric (likes, comments, bookmarks, hearts) takes a manual number or its own random range (likes in 10k units); Random fills all four per their ranges, Reset restores the page values; check "Auto-randomize each time the panel opens" to re-roll on every panel open
