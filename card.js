@@ -386,6 +386,27 @@
     return span;
   }
 
+  // ---------- watermark ----------
+
+  function xmlEscape(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  }
+
+  function watermarkTileDataUri(text, color, opacity) {
+    const label = (text || "ZhihuCard").trim() || "ZhihuCard";
+    const fill = /^#[0-9a-f]{6}/i.test(color || "") ? color.slice(0, 7) : "#999999";
+    let op = Number(opacity);
+    if (!isFinite(op)) op = 14;
+    op = Math.min(60, Math.max(2, op)) / 100;
+    const W = 240, H = 140, cx = W / 2, cy = H / 2;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+      `<text x="${cx}" y="${cy}" transform="rotate(-30 ${cx} ${cy})" fill="${fill}" fill-opacity="${op}" font-size="14" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">${xmlEscape(label)}</text>` +
+      `</svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
   // ---------- main builder ----------
 
   function buildCard(data, options) {
@@ -575,15 +596,11 @@
       }
     }
 
-    // ----- watermark -----
+    // ----- watermark (full-card tiled text) -----
     if (options.watermark) {
-      const wm = el("div", {
-        marginTop: "8px",
-        textAlign: "right",
-        fontSize: "11px",
-        color: palette.watermark,
-      }, { textContent: "ZhihuCard" });
-      card.appendChild(wm);
+      const uri = watermarkTileDataUri(options.watermarkText, palette.watermark, options.watermarkOpacity);
+      card.style.backgroundImage = `url("${uri}")`;
+      card.style.backgroundRepeat = "repeat";
     }
 
     return card;

@@ -63,6 +63,15 @@
     stat_bookmarks: "收藏",
     stat_hearts: "喜欢",
     statsRangeHint: "左边填区间（点赞单位万），点随机一键生成",
+    watermarkTextLabel: "水印文字",
+    watermarkOpacityLabel: "水印透明度",
+    presetsLabel: "预设用户",
+    presetSaveBtn: "保存当前",
+    presetHint: "填好昵称/签名/头像点保存，点头像一键切换，右键删除",
+    presetEmptyText: "先填昵称/签名/头像再保存",
+    presetSavedText: "已保存 ✓",
+    presetDeletedText: "已删除",
+    presetChipTitle: "预设用户",
     editTextLabel: "编辑文案",
     editTextPlaceholder: "直接修改卡片正文内容…",
     editRestoreBtn: "恢复原文",
@@ -802,6 +811,41 @@
     storageSet({ watermark: !!value });
   }
 
+  async function getWatermarkStyleSetting() {
+    const text = await loadSetting("watermarkText", "ZhihuCard");
+    const opacity = await loadSetting("watermarkOpacity", 14);
+    let op = Number(opacity);
+    if (!isFinite(op)) op = 14;
+    op = Math.min(60, Math.max(2, Math.round(op)));
+    return { text: typeof text === "string" ? text : "ZhihuCard", opacity: op };
+  }
+  function saveWatermarkText(value) {
+    storageSet({ watermarkText: typeof value === "string" ? value : "ZhihuCard" });
+  }
+  function saveWatermarkOpacity(value) {
+    let op = Number(value);
+    if (!isFinite(op)) op = 14;
+    storageSet({ watermarkOpacity: Math.min(60, Math.max(2, Math.round(op))) });
+  }
+
+  const MAX_PROFILE_PRESETS = 5;
+  function sanitizePresets(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter((p) => p && typeof p === "object")
+      .slice(0, MAX_PROFILE_PRESETS)
+      .map((p) => ({
+        nickname: typeof p.nickname === "string" ? p.nickname : "",
+        signature: typeof p.signature === "string" ? p.signature : "",
+        avatar: typeof p.avatar === "string" ? p.avatar : "",
+      }));
+  }
+  function getProfilePresets() {
+    return loadSetting("profilePresets", []).then((v) => sanitizePresets(v));
+  }
+  function saveProfilePresets(list) {
+    storageSet({ profilePresets: sanitizePresets(list) });
+  }
+
   const VALID_STYLES = ["white", "dark", "warm", "cool", "paper", "minimal", "cherry", "tianya", "retro", "matcha", "chocolate", "blueberry", "redTeal", "wallpaper"];
 
   function getSavedStyle() {
@@ -1202,7 +1246,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, watermarkStyle, profilePresets] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1219,6 +1263,8 @@
       getCustomNicknameSetting(),
       getCustomSignatureSetting(),
       getStatsOverrideSetting(),
+      getWatermarkStyleSetting(),
+      getProfilePresets(),
     ]);
     if (!shell.host.isConnected) return;
     await applyUiLang(uiLang);
@@ -1241,6 +1287,9 @@
       customNickname,
       customSignature,
       likesCfg: statsCfg,
+      watermarkText: watermarkStyle.text,
+      watermarkOpacity: watermarkStyle.opacity,
+      profilePresets,
     });
   }
 
@@ -1386,6 +1435,9 @@
       hideTime: !!options.hideTime,
       hideLink: !!options.hideLink,
       watermark: !!options.watermark,
+      watermarkText: options.watermarkText || "ZhihuCard",
+      watermarkOpacity: options.watermarkOpacity || 14,
+      presets: options.profilePresets || [],
       wallpaperCardTheme: (options.wallpaperCard && options.wallpaperCard.theme) || "white",
       wallpaperCardOpacity: (options.wallpaperCard && options.wallpaperCard.opacity) || 100,
       bgId: options.bgId || "aurora",
@@ -1679,6 +1731,51 @@
       const wmLabel = sidebarCheckbox(t("watermarkLabel"), state.watermark, (v) => { state.watermark = v; saveWatermarkSetting(v); });
       sec.appendChild(wmLabel);
       state.watermarkCheckboxEl = wmLabel.querySelector("input");
+
+      // 水印文字 + 透明度（满屏平铺）
+      const wmTextRow = document.createElement("div");
+      Object.assign(wmTextRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
+      const wmTextLbl = document.createElement("span");
+      Object.assign(wmTextLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      wmTextLbl.textContent = t("watermarkTextLabel");
+      const wmTextInput = document.createElement("input");
+      wmTextInput.type = "text";
+      wmTextInput.value = state.watermarkText;
+      Object.assign(wmTextInput.style, {
+        flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
+        borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
+      });
+      let wmTextTimer = 0;
+      wmTextInput.addEventListener("input", () => {
+        state.watermarkText = wmTextInput.value;
+        clearTimeout(wmTextTimer);
+        wmTextTimer = setTimeout(() => { saveWatermarkText(state.watermarkText); rebuildCard(); }, 400);
+      });
+      wmTextRow.appendChild(wmTextLbl); wmTextRow.appendChild(wmTextInput);
+      sec.appendChild(wmTextRow);
+
+      const wmOpRow = document.createElement("div");
+      Object.assign(wmOpRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0" });
+      const wmOpLbl = document.createElement("span");
+      Object.assign(wmOpLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      wmOpLbl.textContent = t("watermarkOpacityLabel");
+      const wmOpSlider = document.createElement("input");
+      wmOpSlider.type = "range"; wmOpSlider.min = "2"; wmOpSlider.max = "60"; wmOpSlider.step = "1";
+      wmOpSlider.value = String(state.watermarkOpacity); wmOpSlider.className = "zc-slider";
+      Object.assign(wmOpSlider.style, { flex: "1", cursor: "pointer" });
+      const wmOpVal = document.createElement("span");
+      Object.assign(wmOpVal.style, { fontSize: "11px", color: "#6c5ce7", minWidth: "34px", textAlign: "right" });
+      wmOpVal.textContent = `${state.watermarkOpacity}%`;
+      wmOpSlider.addEventListener("input", () => { wmOpVal.textContent = `${wmOpSlider.value}%`; });
+      wmOpSlider.addEventListener("change", () => {
+        state.watermarkOpacity = Math.min(60, Math.max(2, Number(wmOpSlider.value) || 14));
+        wmOpVal.textContent = `${state.watermarkOpacity}%`;
+        saveWatermarkOpacity(state.watermarkOpacity);
+        rebuildCard();
+      });
+      wmOpRow.appendChild(wmOpLbl); wmOpRow.appendChild(wmOpSlider); wmOpRow.appendChild(wmOpVal);
+      sec.appendChild(wmOpRow);
+
       sec.appendChild(sidebarCheckbox(t("hideStatsLabel"), state.hideStats, (v) => { state.hideStats = v; saveHideStats(v); }));
       sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
       sec.appendChild(sidebarCheckbox(t("hideLinkLabel"), state.hideLink, (v) => { state.hideLink = v; saveHideLink(v); }));
@@ -1957,6 +2054,7 @@
         else preview.removeAttribute("src");
       }
       paintAvatarPreview();
+      state.avatarPreviewPaint = paintAvatarPreview;
 
       const uploadBtn = document.createElement("label");
       uploadBtn.textContent = t("customAvatarUpload");
@@ -1976,8 +2074,7 @@
           const dataUrl = await resizeImageFileToDataUrl(file, 512);
           state.customAvatar = dataUrl;
           saveCustomAvatar(dataUrl);
-      paintAvatarPreview();
-      state.avatarPreviewPaint = paintAvatarPreview;
+          paintAvatarPreview();
           rebuildCard();
         } catch (_) {
           // ignore upload failures
@@ -1993,8 +2090,15 @@
         padding: "6px 10px", flexShrink: "0",
       });
       clearBtn.addEventListener("click", () => {
+        // 恢复默认用户：头像/昵称/签名全部清掉，回到原作者
         state.customAvatar = "";
+        state.customNickname = "";
+        state.customSignature = "";
         saveCustomAvatar("");
+        saveCustomNickname("");
+        saveCustomSignature("");
+        if (state.nicknameInputEl) state.nicknameInputEl.value = "";
+        if (state.signatureInputEl) state.signatureInputEl.value = "";
         paintAvatarPreview();
         rebuildCard();
       });
@@ -2004,6 +2108,106 @@
       avatarRow.appendChild(uploadBtn);
       avatarRow.appendChild(clearBtn);
       sec.appendChild(avatarRow);
+
+      // ----- 预设用户（最多 5 个，点头像一键切换） -----
+      const presetRow = document.createElement("div");
+      Object.assign(presetRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "6px 0 2px", flexWrap: "wrap" });
+      const presetLbl = document.createElement("span");
+      Object.assign(presetLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      presetLbl.textContent = t("presetsLabel");
+      presetRow.appendChild(presetLbl);
+      sec.appendChild(presetRow);
+
+      const presetStrip = document.createElement("div");
+      Object.assign(presetStrip.style, { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "4px" });
+      sec.appendChild(presetStrip);
+
+      const presetHint = document.createElement("div");
+      Object.assign(presetHint.style, { fontSize: "11px", color: "#888", marginTop: "6px" });
+      presetHint.textContent = t("presetHint");
+      sec.appendChild(presetHint);
+
+      function flashHint(msg, ok) {
+        presetHint.textContent = msg;
+        presetHint.style.color = ok ? "#6c5ce7" : "#e06c75";
+        clearTimeout(presetHint.__timer);
+        presetHint.__timer = setTimeout(() => {
+          presetHint.textContent = t("presetHint");
+          presetHint.style.color = "#888";
+        }, 2200);
+      }
+
+      function applyPreset(p) {
+        state.customNickname = p.nickname || "";
+        state.customSignature = p.signature || "";
+        state.customAvatar = p.avatar || "";
+        saveCustomNickname(state.customNickname);
+        saveCustomSignature(state.customSignature);
+        saveCustomAvatar(state.customAvatar);
+        if (state.nicknameInputEl) state.nicknameInputEl.value = state.customNickname;
+        if (state.signatureInputEl) state.signatureInputEl.value = state.customSignature;
+        paintAvatarPreview();
+        rebuildCard();
+        renderPresets();
+      }
+
+      function renderPresets() {
+        presetStrip.innerHTML = "";
+        state.presets.forEach((p, idx) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.title = p.nickname || t("presetChipTitle");
+          const isActive = p.nickname === (state.customNickname || "").trim()
+            && p.signature === (state.customSignature || "").trim()
+            && p.avatar === (state.customAvatar || "");
+          Object.assign(chip.style, {
+            width: "34px", height: "34px", borderRadius: "50%", padding: "0",
+            border: isActive ? "2px solid #6c5ce7" : "2px solid #444",
+            background: "#2d2d44", cursor: "pointer", flexShrink: "0",
+            backgroundImage: p.avatar ? `url("${p.avatar}")` : "none",
+            backgroundSize: "cover", backgroundPosition: "center",
+            fontSize: "13px", fontWeight: "700", color: "#ccc", lineHeight: "30px",
+          });
+          if (!p.avatar) chip.textContent = (p.nickname || "?").trim().slice(0, 1) || "?";
+          chip.addEventListener("click", () => applyPreset(p));
+          chip.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            state.presets.splice(idx, 1);
+            saveProfilePresets(state.presets);
+            renderPresets();
+            flashHint(t("presetDeletedText"), true);
+          });
+          presetStrip.appendChild(chip);
+        });
+      }
+      renderPresets();
+
+      const savePresetBtn = document.createElement("button");
+      savePresetBtn.type = "button";
+      savePresetBtn.textContent = t("presetSaveBtn");
+      Object.assign(savePresetBtn.style, {
+        cursor: "pointer", fontSize: "12px", fontWeight: "600", color: "#fff",
+        background: "#6c5ce7", border: "none", borderRadius: "6px", padding: "6px 12px",
+      });
+      savePresetBtn.addEventListener("click", () => {
+        const nickname = (state.customNickname || "").trim();
+        const signature = (state.customSignature || "").trim();
+        const avatar = state.customAvatar || "";
+        if (!nickname && !signature && !avatar) {
+          flashHint(t("presetEmptyText"), false);
+          return;
+        }
+        const preset = { nickname, signature, avatar };
+        const dup = state.presets.findIndex((p) =>
+          p.nickname === preset.nickname && p.signature === preset.signature && p.avatar === preset.avatar);
+        if (dup >= 0) state.presets.splice(dup, 1);
+        if (state.presets.length >= MAX_PROFILE_PRESETS) state.presets.shift();
+        state.presets.push(preset);
+        saveProfilePresets(state.presets);
+        renderPresets();
+        flashHint(t("presetSavedText"), true);
+      });
+      presetRow.appendChild(savePresetBtn);
     }
 
     // ===== SIDEBAR: TRANSLATE =====
@@ -2182,7 +2386,10 @@
         cardData.stats = merged;
       }
       const cardOptions = {
-        watermark: state.watermark, hideStats: state.hideStats,
+        watermark: state.watermark,
+        watermarkText: state.watermarkText,
+        watermarkOpacity: state.watermarkOpacity,
+        hideStats: state.hideStats,
         hideTime: state.hideTime, hideLink: state.hideLink,
         paragraphGap: state.paragraphGap, titleFontSize: state.titleFontSize,
         bodyFontSize: state.bodyFontSize, locale: effectiveLocale(),
