@@ -57,6 +57,10 @@
     likesRangeLabel: "随机范围(万)",
     likesRandomBtn: "随机",
     likesResetBtn: "还原",
+    editTextLabel: "编辑文案",
+    editTextPlaceholder: "直接修改卡片正文内容…",
+    editRestoreBtn: "恢复原文",
+    editHint: "改完自动更新预览",
   };
 
   function applyFallbackSubstitutions(template, substitutions) {
@@ -1673,6 +1677,63 @@
       sec.appendChild(sidebarSlider(t("bodyFontSizeLabel"), state.bodyFontSize, 12, 48, (v) => { state.bodyFontSize = v; saveBodyFontSize(v); }));
     }
 
+    // ===== SIDEBAR: EDIT TEXT =====
+    {
+      const sec = sidebarSection(t("editTextLabel"));
+      const originalText = data.text || "";
+
+      const ta = document.createElement("textarea");
+      ta.value = originalText;
+      ta.placeholder = t("editTextPlaceholder");
+      Object.assign(ta.style, {
+        width: "100%", boxSizing: "border-box", minHeight: "140px", resize: "vertical",
+        background: "#2d2d44", border: "1px solid #444", borderRadius: "6px",
+        color: "#e0e0e0", fontSize: "13px", lineHeight: "1.6", padding: "8px 10px", outline: "none",
+      });
+      sec.appendChild(ta);
+
+      const btnRow = document.createElement("div");
+      Object.assign(btnRow.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" });
+
+      const restoreBtn = document.createElement("button");
+      restoreBtn.type = "button";
+      restoreBtn.textContent = t("editRestoreBtn");
+      Object.assign(restoreBtn.style, {
+        cursor: "pointer", fontSize: "12px", fontWeight: "600", color: "#aaa",
+        background: "transparent", border: "1px solid #555", borderRadius: "6px", padding: "6px 10px",
+      });
+      restoreBtn.addEventListener("click", () => {
+        ta.value = originalText;
+        data.text = originalText;
+        if (state.translatedText) {
+          state.translatedText = null;
+          if (state.translateCheckbox) state.translateCheckbox.checked = false;
+        }
+        rebuildCard();
+      });
+
+      const hint = document.createElement("span");
+      Object.assign(hint.style, { fontSize: "11px", color: "#888" });
+      hint.textContent = t("editHint");
+
+      btnRow.appendChild(restoreBtn);
+      btnRow.appendChild(hint);
+      sec.appendChild(btnRow);
+
+      let editTimer = 0;
+      ta.addEventListener("input", () => {
+        clearTimeout(editTimer);
+        editTimer = setTimeout(() => {
+          data.text = ta.value;
+          if (state.translatedText) {
+            state.translatedText = null;
+            if (state.translateCheckbox) state.translateCheckbox.checked = false;
+          }
+          rebuildCard();
+        }, 400);
+      });
+    }
+
     // ===== SIDEBAR: CUSTOM PROFILE =====
     {
       const sec = sidebarSection(t("customProfileLabel"));
@@ -1793,6 +1854,7 @@
       Object.assign(label.style, { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#ccc", cursor: "pointer", padding: "4px 0" });
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox"; checkbox.className = "zc-checkbox";
+      state.translateCheckbox = checkbox;
       const span = document.createElement("span");
       span.textContent = t("translateLabel");
       label.appendChild(checkbox); label.appendChild(span);

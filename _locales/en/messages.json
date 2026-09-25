@@ -67,5 +67,9 @@
   "likesOriginalLabel": { "message": "From page" },
   "likesRangeLabel": { "message": "Range (10k)" },
   "likesRandomBtn": { "message": "Random" },
-  "likesResetBtn": { "message": "Reset" }
+  "likesResetBtn": { "message": "Reset" },
+  "editTextLabel": { "message": "Edit text" },
+  "editTextPlaceholder": { "message": "Edit the card body directly…" },
+  "editRestoreBtn": { "message": "Restore original" },
+  "editHint": { "message": "Preview updates as you type" }
 }

@@ -67,5 +67,9 @@
   "likesOriginalLabel": { "message": "原数据" },
   "likesRangeLabel": { "message": "随机范围(万)" },
   "likesRandomBtn": { "message": "随机" },
-  "likesResetBtn": { "message": "还原" }
+  "likesResetBtn": { "message": "还原" },
+  "editTextLabel": { "message": "编辑文案" },
+  "editTextPlaceholder": { "message": "直接修改卡片正文内容…" },
+  "editRestoreBtn": { "message": "恢复原文" },
+  "editHint": { "message": "改完自动更新预览" }
 }

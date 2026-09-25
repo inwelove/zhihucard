@@ -14,6 +14,7 @@
 - 可隐藏互动数据和时间
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
 - 赞同数可手动改写：设定随机范围（默认 3–5 万），点「随机」生成，点「还原」恢复原数据
+- 侧栏「编辑文案」可直接改写卡片正文，改完自动刷新预览，可一键恢复原文
 - 界面语言自动跟随浏览器，弹窗右上角也能手动一键切换中／English
 - 支持下载 PNG，或直接复制图片到剪贴板
 - 可选在卡片右下角显示 ZhihuCard 署名水印，默认关闭
@@ -73,6 +74,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - Optionally hide the engagement stats and the timestamp
 - Shows a "N people upvoted this answer" line under the author
 - Overwrite the upvote count — set a random range (default 30k–50k), hit Random, or restore the real number
+- Edit the card body text directly from the sidebar; the preview refreshes as you type
 - UI follows your browser language with manual toggle
 - Download as PNG, or copy to clipboard
 - Optional "ZhihuCard" watermark — off by default
