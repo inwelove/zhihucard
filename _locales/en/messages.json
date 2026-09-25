@@ -61,5 +61,11 @@
   "customAvatarUpload": { "message": "Upload avatar" },
   "customAvatarClear": { "message": "Reset" },
   "customSignatureLabel": { "message": "Signature" },
-  "customSignaturePlaceholder": { "message": "Leave empty to use the original signature" }
+  "customSignaturePlaceholder": { "message": "Leave empty to use the original signature" },
+  "likesLabel": { "message": "Like count" },
+  "likesCurrentLabel": { "message": "Current: " },
+  "likesOriginalLabel": { "message": "From page" },
+  "likesRangeLabel": { "message": "Range (10k)" },
+  "likesRandomBtn": { "message": "Random" },
+  "likesResetBtn": { "message": "Reset" }
 }

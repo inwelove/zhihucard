@@ -61,5 +61,11 @@
   "customAvatarUpload": { "message": "上传头像" },
   "customAvatarClear": { "message": "恢复默认" },
   "customSignatureLabel": { "message": "个人签名" },
-  "customSignaturePlaceholder": { "message": "留空则使用原作者签名" }
+  "customSignaturePlaceholder": { "message": "留空则使用原作者签名" },
+  "likesLabel": { "message": "点赞数量" },
+  "likesCurrentLabel": { "message": "当前值：" },
+  "likesOriginalLabel": { "message": "原数据" },
+  "likesRangeLabel": { "message": "随机范围(万)" },
+  "likesRandomBtn": { "message": "随机" },
+  "likesResetBtn": { "message": "还原" }
 }

@@ -51,6 +51,12 @@
     customAvatarClear: "恢复默认",
     customSignatureLabel: "个人签名",
     customSignaturePlaceholder: "留空则使用原作者签名",
+    likesLabel: "点赞数量",
+    likesCurrentLabel: "当前值：",
+    likesOriginalLabel: "原数据",
+    likesRangeLabel: "随机范围(万)",
+    likesRandomBtn: "随机",
+    likesResetBtn: "还原",
   };
 
   function applyFallbackSubstitutions(template, substitutions) {
@@ -858,6 +864,26 @@
     try { chrome.storage.sync.set({ paragraphGap: !!value }); } catch (_) {}
   }
 
+  function getLikesOverrideSetting() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.sync.get({ likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }, (res) =>
+          resolve({
+            likesOverride: Math.max(0, Number(res.likesOverride) || 0),
+            likesRandomMin: Number(res.likesRandomMin) || 3,
+            likesRandomMax: Number(res.likesRandomMax) || 5,
+          })
+        );
+      } catch (_) { resolve({ likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }); }
+    });
+  }
+  function saveLikesOverride(value) {
+    try { chrome.storage.sync.set({ likesOverride: Math.max(0, Number(value) || 0) }); } catch (_) {}
+  }
+  function saveLikesRandomRange(min, max) {
+    try { chrome.storage.sync.set({ likesRandomMin: Number(min) || 3, likesRandomMax: Number(max) || 5 }); } catch (_) {}
+  }
+
   function getTitleFontSizeSetting() {
     return new Promise((resolve) => {
       try {
@@ -1113,7 +1139,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, likesCfg] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1129,6 +1155,7 @@
       getCustomAvatarSetting(),
       getCustomNicknameSetting(),
       getCustomSignatureSetting(),
+      getLikesOverrideSetting(),
     ]);
     if (!shell.host.isConnected) return;
     await applyUiLang(uiLang);
@@ -1150,6 +1177,7 @@
       customAvatar,
       customNickname,
       customSignature,
+      likesCfg,
     });
   }
 
@@ -1303,6 +1331,9 @@
       customAvatar: options.customAvatar || "",
       customNickname: options.customNickname || "",
       customSignature: options.customSignature || "",
+      likesOverride: (options.likesCfg && options.likesCfg.likesOverride) || 0,
+      likesRandomMin: (options.likesCfg && options.likesCfg.likesRandomMin) || 3,
+      likesRandomMax: (options.likesCfg && options.likesCfg.likesRandomMax) || 5,
       exportEl: null,
     };
 
@@ -1542,6 +1573,97 @@
       sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
       sec.appendChild(sidebarCheckbox(t("hideLinkLabel"), state.hideLink, (v) => { state.hideLink = v; saveHideLink(v); }));
       sec.appendChild(sidebarCheckbox(t("paragraphGapLabel"), state.paragraphGap, (v) => { state.paragraphGap = v; saveParagraphGap(v); }));
+    }
+
+    // ===== SIDEBAR: LIKE COUNT =====
+    {
+      const sec = sidebarSection(t("likesLabel"));
+      Object.assign(sec.style, { paddingBottom: "12px" });
+
+      const valRow = document.createElement("div");
+      Object.assign(valRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "2px 0" });
+      const curLbl = document.createElement("span");
+      Object.assign(curLbl.style, { fontSize: "12px", color: "#888", whiteSpace: "nowrap" });
+      curLbl.textContent = t("likesCurrentLabel");
+      const curVal = document.createElement("span");
+      Object.assign(curVal.style, { fontSize: "13px", color: "#6c5ce7", fontWeight: "600" });
+      valRow.appendChild(curLbl); valRow.appendChild(curVal);
+      sec.appendChild(valRow);
+
+      const randRow = document.createElement("div");
+      Object.assign(randRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0", flexWrap: "wrap" });
+      const rangeLbl = document.createElement("span");
+      Object.assign(rangeLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      rangeLbl.textContent = t("likesRangeLabel");
+
+      function makeRangeInput(value) {
+        const inp = document.createElement("input");
+        inp.type = "number"; inp.min = "0"; inp.step = "0.1";
+        inp.value = String(value);
+        Object.assign(inp.style, {
+          width: "56px", background: "#2d2d44", border: "1px solid #444",
+          borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "5px 6px", outline: "none",
+        });
+        return inp;
+      }
+      const minInput = makeRangeInput(state.likesRandomMin);
+      const sep = document.createElement("span");
+      Object.assign(sep.style, { fontSize: "12px", color: "#888" });
+      sep.textContent = "–";
+      const maxInput = makeRangeInput(state.likesRandomMax);
+
+      function makeBtn(text, primary) {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = text;
+        Object.assign(b.style, {
+          cursor: "pointer", fontSize: "12px", fontWeight: "600",
+          color: primary ? "#fff" : "#aaa",
+          background: primary ? "#6c5ce7" : "transparent",
+          border: primary ? "none" : "1px solid #555",
+          borderRadius: "6px", padding: "6px 10px", flexShrink: "0",
+        });
+        return b;
+      }
+
+      function paintLikesValue() {
+        curVal.textContent = state.likesOverride > 0
+          ? (window.ZhihuCard ? window.ZhihuCard.formatCount(state.likesOverride) : String(state.likesOverride))
+          : t("likesOriginalLabel");
+      }
+
+      const randBtn = makeBtn(t("likesRandomBtn"), true);
+      randBtn.addEventListener("click", () => {
+        let lo = Number(minInput.value); let hi = Number(maxInput.value);
+        if (!isFinite(lo) || lo < 0) lo = 3;
+        if (!isFinite(hi) || hi < 0) hi = 5;
+        if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
+        minInput.value = String(lo); maxInput.value = String(hi);
+        state.likesRandomMin = lo; state.likesRandomMax = hi;
+        saveLikesRandomRange(lo, hi);
+        const loN = Math.round(lo * 10000);
+        const hiN = Math.round(hi * 10000);
+        state.likesOverride = loN + Math.floor(Math.random() * (hiN - loN + 1));
+        saveLikesOverride(state.likesOverride);
+        paintLikesValue();
+        rebuildCard();
+      });
+
+      const resetBtn = makeBtn(t("likesResetBtn"), false);
+      resetBtn.addEventListener("click", () => {
+        state.likesOverride = 0;
+        saveLikesOverride(0);
+        paintLikesValue();
+        rebuildCard();
+      });
+
+      randRow.appendChild(rangeLbl);
+      randRow.appendChild(minInput);
+      randRow.appendChild(sep);
+      randRow.appendChild(maxInput);
+      randRow.appendChild(randBtn);
+      randRow.appendChild(resetBtn);
+      sec.appendChild(randRow);
+      paintLikesValue();
     }
 
     // ===== SIDEBAR: FONT SIZE =====
@@ -1831,6 +1953,9 @@
         avatar: state.customAvatar || data.avatar,
         authorHeadline: (state.customSignature || "").trim() || data.authorHeadline,
       });
+      if (state.likesOverride > 0) {
+        cardData.stats = Object.assign({}, data.stats, { likes: state.likesOverride });
+      }
       const cardOptions = {
         watermark: options.watermark, hideStats: state.hideStats,
         hideTime: state.hideTime, hideLink: state.hideLink,
