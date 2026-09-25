@@ -57,6 +57,11 @@
     likesRangeLabel: "随机范围(万)",
     likesRandomBtn: "随机",
     likesResetBtn: "还原",
+    statsLabel: "互动数据",
+    stat_likes: "点赞",
+    stat_comments: "评论",
+    stat_bookmarks: "收藏",
+    stat_hearts: "喜欢",
     editTextLabel: "编辑文案",
     editTextPlaceholder: "直接修改卡片正文内容…",
     editRestoreBtn: "恢复原文",
@@ -868,21 +873,34 @@
     try { chrome.storage.sync.set({ paragraphGap: !!value }); } catch (_) {}
   }
 
-  function getLikesOverrideSetting() {
+  const STAT_KEYS = ["likes", "comments", "bookmarks", "hearts"];
+
+  function getStatsOverrideSetting() {
+    const defaults = { likes: 0, comments: 0, bookmarks: 0, hearts: 0, likesRandomMin: 3, likesRandomMax: 5 };
     return new Promise((resolve) => {
       try {
-        chrome.storage.sync.get({ likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }, (res) =>
-          resolve({
-            likesOverride: Math.max(0, Number(res.likesOverride) || 0),
-            likesRandomMin: Number(res.likesRandomMin) || 3,
-            likesRandomMax: Number(res.likesRandomMax) || 5,
-          })
-        );
-      } catch (_) { resolve({ likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }); }
+        chrome.storage.sync.get({ statsOverride: null, likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }, (res) => {
+          const hasSaved = res.statsOverride && typeof res.statsOverride === "object";
+          const saved = hasSaved ? res.statsOverride : {};
+          const out = {
+            likes: hasSaved ? (Number(saved.likes) || 0) : (Number(res.likesOverride) || 0),
+            comments: Number(saved.comments) || 0,
+            bookmarks: Number(saved.bookmarks) || 0,
+            hearts: Number(saved.hearts) || 0,
+            likesRandomMin: Number(res.likesRandomMin) || defaults.likesRandomMin,
+            likesRandomMax: Number(res.likesRandomMax) || defaults.likesRandomMax,
+          };
+          resolve(out);
+        });
+      } catch (_) { resolve(defaults); }
     });
   }
-  function saveLikesOverride(value) {
-    try { chrome.storage.sync.set({ likesOverride: Math.max(0, Number(value) || 0) }); } catch (_) {}
+  function saveStatsOverride(stats) {
+    try {
+      const out = {};
+      STAT_KEYS.forEach((k) => { out[k] = Math.max(0, Number(stats[k]) || 0); });
+      chrome.storage.sync.set({ statsOverride: out });
+    } catch (_) {}
   }
   function saveLikesRandomRange(min, max) {
     try { chrome.storage.sync.set({ likesRandomMin: Number(min) || 3, likesRandomMax: Number(max) || 5 }); } catch (_) {}
@@ -1143,7 +1161,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, likesCfg] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1159,7 +1177,7 @@
       getCustomAvatarSetting(),
       getCustomNicknameSetting(),
       getCustomSignatureSetting(),
-      getLikesOverrideSetting(),
+      getStatsOverrideSetting(),
     ]);
     if (!shell.host.isConnected) return;
     await applyUiLang(uiLang);
@@ -1181,7 +1199,7 @@
       customAvatar,
       customNickname,
       customSignature,
-      likesCfg,
+      likesCfg: statsCfg,
     });
   }
 
@@ -1335,7 +1353,12 @@
       customAvatar: options.customAvatar || "",
       customNickname: options.customNickname || "",
       customSignature: options.customSignature || "",
-      likesOverride: (options.likesCfg && options.likesCfg.likesOverride) || 0,
+      statsOverride: {
+        likes: (options.likesCfg && options.likesCfg.likes) || 0,
+        comments: (options.likesCfg && options.likesCfg.comments) || 0,
+        bookmarks: (options.likesCfg && options.likesCfg.bookmarks) || 0,
+        hearts: (options.likesCfg && options.likesCfg.hearts) || 0,
+      },
       likesRandomMin: (options.likesCfg && options.likesCfg.likesRandomMin) || 3,
       likesRandomMax: (options.likesCfg && options.likesCfg.likesRandomMax) || 5,
       exportEl: null,
@@ -1579,42 +1602,10 @@
       sec.appendChild(sidebarCheckbox(t("paragraphGapLabel"), state.paragraphGap, (v) => { state.paragraphGap = v; saveParagraphGap(v); }));
     }
 
-    // ===== SIDEBAR: LIKE COUNT =====
+    // ===== SIDEBAR: ENGAGEMENT STATS =====
     {
-      const sec = sidebarSection(t("likesLabel"));
+      const sec = sidebarSection(t("statsLabel"));
       Object.assign(sec.style, { paddingBottom: "12px" });
-
-      const valRow = document.createElement("div");
-      Object.assign(valRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "2px 0" });
-      const curLbl = document.createElement("span");
-      Object.assign(curLbl.style, { fontSize: "12px", color: "#888", whiteSpace: "nowrap" });
-      curLbl.textContent = t("likesCurrentLabel");
-      const curVal = document.createElement("span");
-      Object.assign(curVal.style, { fontSize: "13px", color: "#6c5ce7", fontWeight: "600" });
-      valRow.appendChild(curLbl); valRow.appendChild(curVal);
-      sec.appendChild(valRow);
-
-      const randRow = document.createElement("div");
-      Object.assign(randRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0", flexWrap: "wrap" });
-      const rangeLbl = document.createElement("span");
-      Object.assign(rangeLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
-      rangeLbl.textContent = t("likesRangeLabel");
-
-      function makeRangeInput(value) {
-        const inp = document.createElement("input");
-        inp.type = "number"; inp.min = "0"; inp.step = "0.1";
-        inp.value = String(value);
-        Object.assign(inp.style, {
-          width: "56px", background: "#2d2d44", border: "1px solid #444",
-          borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "5px 6px", outline: "none",
-        });
-        return inp;
-      }
-      const minInput = makeRangeInput(state.likesRandomMin);
-      const sep = document.createElement("span");
-      Object.assign(sep.style, { fontSize: "12px", color: "#888" });
-      sep.textContent = "–";
-      const maxInput = makeRangeInput(state.likesRandomMax);
 
       function makeBtn(text, primary) {
         const b = document.createElement("button");
@@ -1624,19 +1615,43 @@
           color: primary ? "#fff" : "#aaa",
           background: primary ? "#6c5ce7" : "transparent",
           border: primary ? "none" : "1px solid #555",
-          borderRadius: "6px", padding: "6px 10px", flexShrink: "0",
+          borderRadius: "6px", padding: "5px 10px", flexShrink: "0",
         });
         return b;
       }
-
-      function paintLikesValue() {
-        curVal.textContent = state.likesOverride > 0
-          ? (window.ZhihuCard ? window.ZhihuCard.formatCount(state.likesOverride) : String(state.likesOverride))
-          : t("likesOriginalLabel");
+      function makeNumInput(value, width) {
+        const inp = document.createElement("input");
+        inp.type = "number"; inp.min = "0"; inp.step = "1";
+        inp.value = value > 0 ? String(value) : "";
+        inp.placeholder = t("likesOriginalLabel");
+        Object.assign(inp.style, {
+          width: width, background: "#2d2d44", border: "1px solid #444",
+          borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "5px 6px", outline: "none",
+        });
+        return inp;
       }
 
-      const randBtn = makeBtn(t("likesRandomBtn"), true);
-      randBtn.addEventListener("click", () => {
+      // 随机范围(万) — 紧跟在标题下面
+      const rangeRow = document.createElement("div");
+      Object.assign(rangeRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "2px 0 6px", flexWrap: "wrap" });
+      const rangeLbl = document.createElement("span");
+      Object.assign(rangeLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      rangeLbl.textContent = t("likesRangeLabel");
+      const minInput = makeNumInput(0, "54px");
+      minInput.step = "0.1";
+      minInput.value = String(state.likesRandomMin);
+      const sep = document.createElement("span");
+      Object.assign(sep.style, { fontSize: "12px", color: "#888" });
+      sep.textContent = "–";
+      const maxInput = makeNumInput(0, "54px");
+      maxInput.step = "0.1";
+      maxInput.value = String(state.likesRandomMax);
+      rangeRow.appendChild(rangeLbl);
+      rangeRow.appendChild(minInput);
+      rangeRow.appendChild(sep);
+      rangeRow.appendChild(maxInput);
+
+      function readRange() {
         let lo = Number(minInput.value); let hi = Number(maxInput.value);
         if (!isFinite(lo) || lo < 0) lo = 3;
         if (!isFinite(hi) || hi < 0) hi = 5;
@@ -1644,30 +1659,53 @@
         minInput.value = String(lo); maxInput.value = String(hi);
         state.likesRandomMin = lo; state.likesRandomMax = hi;
         saveLikesRandomRange(lo, hi);
-        const loN = Math.round(lo * 10000);
-        const hiN = Math.round(hi * 10000);
-        state.likesOverride = loN + Math.floor(Math.random() * (hiN - loN + 1));
-        saveLikesOverride(state.likesOverride);
-        paintLikesValue();
-        rebuildCard();
+        return [Math.round(lo * 10000), Math.round(hi * 10000)];
+      }
+
+      // 每个统计项一行
+      const statInputs = {};
+      STAT_KEYS.forEach((key) => {
+        const row = document.createElement("div");
+        Object.assign(row.style, { display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" });
+        const lbl = document.createElement("span");
+        Object.assign(lbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap", minWidth: "42px" });
+        lbl.textContent = t("stat_" + key);
+        const inp = makeNumInput(state.statsOverride[key], "88px");
+        inp.addEventListener("change", () => {
+          state.statsOverride[key] = Math.max(0, Math.round(Number(inp.value) || 0));
+          inp.value = state.statsOverride[key] > 0 ? String(state.statsOverride[key]) : "";
+          saveStatsOverride(state.statsOverride);
+          rebuildCard();
+        });
+        statInputs[key] = inp;
+        row.appendChild(lbl); row.appendChild(inp);
+        sec.appendChild(row);
       });
 
+      const btnRow = document.createElement("div");
+      Object.assign(btnRow.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" });
+      const randBtn = makeBtn(t("likesRandomBtn"), true);
+      randBtn.addEventListener("click", () => {
+        const [loN, hiN] = readRange();
+        STAT_KEYS.forEach((key) => {
+          state.statsOverride[key] = loN + Math.floor(Math.random() * (hiN - loN + 1));
+          statInputs[key].value = String(state.statsOverride[key]);
+        });
+        saveStatsOverride(state.statsOverride);
+        rebuildCard();
+      });
       const resetBtn = makeBtn(t("likesResetBtn"), false);
       resetBtn.addEventListener("click", () => {
-        state.likesOverride = 0;
-        saveLikesOverride(0);
-        paintLikesValue();
+        STAT_KEYS.forEach((key) => {
+          state.statsOverride[key] = 0;
+          statInputs[key].value = "";
+        });
+        saveStatsOverride(state.statsOverride);
         rebuildCard();
       });
-
-      randRow.appendChild(rangeLbl);
-      randRow.appendChild(minInput);
-      randRow.appendChild(sep);
-      randRow.appendChild(maxInput);
-      randRow.appendChild(randBtn);
-      randRow.appendChild(resetBtn);
-      sec.appendChild(randRow);
-      paintLikesValue();
+      btnRow.appendChild(randBtn);
+      btnRow.appendChild(resetBtn);
+      sec.appendChild(btnRow);
     }
 
     // ===== SIDEBAR: FONT SIZE =====
@@ -2015,8 +2053,10 @@
         avatar: state.customAvatar || data.avatar,
         authorHeadline: (state.customSignature || "").trim() || data.authorHeadline,
       });
-      if (state.likesOverride > 0) {
-        cardData.stats = Object.assign({}, data.stats, { likes: state.likesOverride });
+      if (STAT_KEYS.some((k) => state.statsOverride[k] > 0)) {
+        const merged = Object.assign({}, data.stats || {});
+        STAT_KEYS.forEach((k) => { if (state.statsOverride[k] > 0) merged[k] = state.statsOverride[k]; });
+        cardData.stats = merged;
       }
       const cardOptions = {
         watermark: options.watermark, hideStats: state.hideStats,
