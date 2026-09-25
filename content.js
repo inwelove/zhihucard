@@ -2077,7 +2077,7 @@
       nickLbl.textContent = t("customNicknameLabel");
       const nickInput = document.createElement("input");
       nickInput.type = "text";
-      nickInput.value = state.customNickname;
+      nickInput.value = state.customNickname || data.author || "";
       nickInput.placeholder = t("customNicknamePlaceholder");
       Object.assign(nickInput.style, {
         flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
@@ -2105,7 +2105,7 @@
       sigLbl.textContent = t("customSignatureLabel");
       const sigInput = document.createElement("input");
       sigInput.type = "text";
-      sigInput.value = state.customSignature;
+      sigInput.value = state.customSignature || data.authorHeadline || "";
       sigInput.placeholder = t("customSignaturePlaceholder");
       Object.assign(sigInput.style, {
         flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
@@ -2138,10 +2138,17 @@
         width: "32px", height: "32px", borderRadius: "50%", objectFit: "cover",
         background: "#2d2d44", border: "1px solid #444", flexShrink: "0",
       });
+      const defaultAvatar = data.avatar || "";
       function paintAvatarPreview() {
-        if (state.customAvatar) preview.src = state.customAvatar;
+        const src = state.customAvatar || defaultAvatar;
+        if (src) preview.src = src;
         else preview.removeAttribute("src");
       }
+      preview.addEventListener("error", () => {
+        const alt = state.customAvatar ? defaultAvatar : "";
+        if (alt && preview.getAttribute("src") !== alt) preview.src = alt;
+        else if (!alt) preview.removeAttribute("src");
+      });
       paintAvatarPreview();
       state.avatarPreviewPaint = paintAvatarPreview;
 
@@ -2179,15 +2186,15 @@
         padding: "6px 10px", flexShrink: "0",
       });
       clearBtn.addEventListener("click", () => {
-        // 恢复默认用户：头像/昵称/签名全部清掉，回到原作者
+        // 恢复默认用户：头像/昵称/签名全部回原作者默认值
         state.customAvatar = "";
         state.customNickname = "";
         state.customSignature = "";
         saveCustomAvatar("");
         saveCustomNickname("");
         saveCustomSignature("");
-        if (state.nicknameInputEl) state.nicknameInputEl.value = "";
-        if (state.signatureInputEl) state.signatureInputEl.value = "";
+        if (state.nicknameInputEl) state.nicknameInputEl.value = data.author || "";
+        if (state.signatureInputEl) state.signatureInputEl.value = data.authorHeadline || "";
         paintAvatarPreview();
         rebuildCard();
       });
@@ -2233,8 +2240,8 @@
         saveCustomNickname(state.customNickname);
         saveCustomSignature(state.customSignature);
         saveCustomAvatar(state.customAvatar);
-        if (state.nicknameInputEl) state.nicknameInputEl.value = state.customNickname;
-        if (state.signatureInputEl) state.signatureInputEl.value = state.customSignature;
+        if (state.nicknameInputEl) state.nicknameInputEl.value = state.customNickname || data.author || "";
+        if (state.signatureInputEl) state.signatureInputEl.value = state.customSignature || data.authorHeadline || "";
         paintAvatarPreview();
         rebuildCard();
         renderPresets();

@@ -17,7 +17,7 @@
 - 「互动数据」整块可编辑：点赞／评论／收藏／喜欢每项都能手填数字，也能各设一个随机区间（点赞单位万），「随机」按各自区间一键全部生成、「还原」全部恢复；勾选「打开面板时自动随机一次」，每次打开面板自动按区间重掷
 - 水印开关同时在侧栏「选项」和扩展弹窗里，改了立即生效；水印为满屏斜向平铺，可自定义文字、透明度（2%–60%）与密度（40%–220%）
 - 头像／昵称／签名一次设置永久记住（本地保存，跨设备尽力同步）
-- 预设用户：填好昵称/签名/头像点「保存当前」，最多 5 个；点头像圆形一键切换，右键删除，「恢复默认」回到原作者
+- 预设用户：填好昵称/签名/头像点「保存当前」，最多 5 个；点头像圆形一键切换，右键删除，「恢复默认」回到原作者（头像预览/昵称/签名都载入原作者默认值）
 - 侧栏「编辑文案」可直接改写卡片正文，改完自动刷新预览，可一键恢复原文
 - 界面语言自动跟随浏览器，弹窗右上角也能手动一键切换中／English
 - 支持下载 PNG，或直接复制图片到剪贴板
@@ -81,7 +81,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - The whole engagement stats block is editable: each metric (likes, comments, bookmarks, hearts) takes a manual number or its own random range (likes in 10k units); Random fills all four per their ranges, Reset restores the page values; check "Auto-randomize each time the panel opens" to re-roll on every panel open
 - Watermark toggle lives in both the sidebar options and the extension popup, applying instantly; the watermark is a full-card diagonal tile with editable text, opacity (2%–60%), and density (40%–220%)
 - Custom avatar, nickname, and signature persist locally after a single setup
-- Saved profiles: fill in the fields, hit "Save current" (up to 5), click a circle to switch instantly, right-click to remove, "Reset" goes back to the original author
+- Saved profiles: fill in the fields, hit "Save current" (up to 5), click a circle to switch instantly, right-click to remove, "Reset" goes back to the original author (avatar preview, nickname, and signature all show the original defaults)
 - Edit the card body text directly from the sidebar; the preview refreshes as you type
 - UI follows your browser language with manual toggle
 - Download as PNG, or copy to clipboard
