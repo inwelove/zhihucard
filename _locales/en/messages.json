@@ -74,6 +74,7 @@
   "stat_bookmarks": { "message": "Bookmarks" },
   "stat_hearts": { "message": "Hearts" },
   "statsRangeHint": { "message": "Set a range on the left (likes in 10k), then hit Random" },
+  "statsAutoRandomLabel": { "message": "Auto-randomize each time the panel opens" },
   "watermarkTextLabel": { "message": "Watermark text" },
   "watermarkOpacityLabel": { "message": "Watermark opacity" },
   "watermarkDensityLabel": { "message": "Watermark density" },

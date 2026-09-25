@@ -63,6 +63,7 @@
     stat_bookmarks: "收藏",
     stat_hearts: "喜欢",
     statsRangeHint: "左边填区间（点赞单位万），点随机一键生成",
+    statsAutoRandomLabel: "打开面板时自动随机一次",
     watermarkTextLabel: "水印文字",
     watermarkOpacityLabel: "水印透明度",
     watermarkDensityLabel: "水印密度",
@@ -1007,6 +1008,12 @@
       chrome.storage.sync.set({ statsRanges: out });
     } catch (_) {}
   }
+  function getStatsAutoRandomSetting() {
+    return loadSetting("statsAutoRandom", false).then((v) => !!v);
+  }
+  function saveStatsAutoRandom(value) {
+    storageSet({ statsAutoRandom: !!value });
+  }
 
   function getTitleFontSizeSetting() {
     return new Promise((resolve) => {
@@ -1256,7 +1263,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, watermarkStyle, profilePresets] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, statsAutoRandom, watermarkStyle, profilePresets] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1273,6 +1280,7 @@
       getCustomNicknameSetting(),
       getCustomSignatureSetting(),
       getStatsOverrideSetting(),
+      getStatsAutoRandomSetting(),
       getWatermarkStyleSetting(),
       getProfilePresets(),
     ]);
@@ -1297,6 +1305,7 @@
       customNickname,
       customSignature,
       likesCfg: statsCfg,
+      statsAutoRandom,
       watermarkText: watermarkStyle.text,
       watermarkOpacity: watermarkStyle.opacity,
       watermarkDensity: watermarkStyle.density,
@@ -1466,6 +1475,7 @@
         hearts: (options.likesCfg && options.likesCfg.hearts) || 0,
       },
       statsRanges: (options.likesCfg && options.likesCfg.ranges) || DEFAULT_STAT_RANGES,
+      statsAutoRandom: !!options.statsAutoRandom,
       exportEl: null,
     };
 
@@ -1948,7 +1958,7 @@
       const btnRow = document.createElement("div");
       Object.assign(btnRow.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" });
       const randBtn = makeBtn(t("likesRandomBtn"), true);
-      randBtn.addEventListener("click", () => {
+      function randomizeStats(persist) {
         STAT_KEYS.forEach((key) => {
           const ctl = statControls[key];
           let lo = Number(ctl.minInput.value); let hi = Number(ctl.maxInput.value);
@@ -1963,10 +1973,13 @@
           state.statsOverride[key] = loN + Math.floor(Math.random() * (hiN - loN + 1));
           ctl.valueInput.value = state.statsOverride[key] > 0 ? String(state.statsOverride[key]) : "";
         });
-        saveStatsRanges(state.statsRanges);
-        saveStatsOverride(state.statsOverride);
-        rebuildCard();
-      });
+        if (persist !== false) {
+          saveStatsRanges(state.statsRanges);
+          saveStatsOverride(state.statsOverride);
+          rebuildCard();
+        }
+      }
+      randBtn.addEventListener("click", () => { randomizeStats(true); });
       const resetBtn = makeBtn(t("likesResetBtn"), false);
       resetBtn.addEventListener("click", () => {
         STAT_KEYS.forEach((key) => {
@@ -1979,6 +1992,14 @@
       btnRow.appendChild(randBtn);
       btnRow.appendChild(resetBtn);
       sec.appendChild(btnRow);
+
+      // 打开时自动随机
+      sec.appendChild(sidebarCheckbox(t("statsAutoRandomLabel"), state.statsAutoRandom, (v) => {
+        state.statsAutoRandom = v;
+        saveStatsAutoRandom(v);
+        if (v) randomizeStats(true);
+      }));
+      if (state.statsAutoRandom) randomizeStats(true);
     }
 
     // ===== SIDEBAR: FONT SIZE =====

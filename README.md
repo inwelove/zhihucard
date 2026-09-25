@@ -14,7 +14,7 @@
 - 可隐藏互动数据和时间
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
 - 赞同数可手动改写：设定随机范围（默认 3–5 万），点「随机」生成，点「还原」恢复原数据
-- 「互动数据」整块可编辑：点赞／评论／收藏／喜欢每项都能手填数字，也能各设一个随机区间（点赞单位万），「随机」按各自区间一键全部生成、「还原」全部恢复
+- 「互动数据」整块可编辑：点赞／评论／收藏／喜欢每项都能手填数字，也能各设一个随机区间（点赞单位万），「随机」按各自区间一键全部生成、「还原」全部恢复；勾选「打开面板时自动随机一次」，每次打开面板自动按区间重掷
 - 水印开关同时在侧栏「选项」和扩展弹窗里，改了立即生效；水印为满屏斜向平铺，可自定义文字、透明度（2%–60%）与密度（40%–220%）
 - 头像／昵称／签名一次设置永久记住（本地保存，跨设备尽力同步）
 - 预设用户：填好昵称/签名/头像点「保存当前」，最多 5 个；点头像圆形一键切换，右键删除，「恢复默认」回到原作者
@@ -78,7 +78,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - Optionally hide the engagement stats and the timestamp
 - Shows a "N people upvoted this answer" line under the author
 - Overwrite the upvote count — set a random range (default 30k–50k), hit Random, or restore the real number
-- The whole engagement stats block is editable: each metric (likes, comments, bookmarks, hearts) takes a manual number or its own random range (likes in 10k units); Random fills all four per their ranges, Reset restores the page values
+- The whole engagement stats block is editable: each metric (likes, comments, bookmarks, hearts) takes a manual number or its own random range (likes in 10k units); Random fills all four per their ranges, Reset restores the page values; check "Auto-randomize each time the panel opens" to re-roll on every panel open
 - Watermark toggle lives in both the sidebar options and the extension popup, applying instantly; the watermark is a full-card diagonal tile with editable text, opacity (2%–60%), and density (40%–220%)
 - Custom avatar, nickname, and signature persist locally after a single setup
 - Saved profiles: fill in the fields, hit "Save current" (up to 5), click a circle to switch instantly, right-click to remove, "Reset" goes back to the original author
