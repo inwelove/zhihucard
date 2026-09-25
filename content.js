@@ -563,32 +563,56 @@
     const stats = { likes: 0, comments: 0, bookmarks: 0, hearts: 0 };
     if (!toolbar) return stats;
 
-    // 赞同按钮 - 多种选择器兼容
-    const likeBtn = toolbar.querySelector('.VoteButton--up, .VoteButton--up .CountValue, [aria-label*="赞同"], [aria-label*="like"]');
-    if (likeBtn) {
-      const m = likeBtn.textContent.match(/([\d,.]+[KMB]?)/);
+    // 从任意文案里取第一个数字，支持 2.2万 / 1.3亿 / 6.35K / 1078
+    function firstNumber(text) {
+      const m = String(text || "").match(/([\d][\d,.]*\s*[万亿KMB]?)/i);
+      return m ? parseCount(m[1]) : 0;
+    }
+
+    const METRICS = [
+      { key: "likes", kw: /赞同|voteup|agree/i },
+      { key: "comments", kw: /评论|comment/i },
+      { key: "bookmarks", kw: /收藏|collect|bookmark/i },
+      { key: "hearts", kw: /喜欢|heart/i },
+    ];
+
+    const candidates = Array.from(toolbar.querySelectorAll(
+      "button, a, [role='button'], .VoteButton, .CommentButton, .BookmarkButton, [class*='VoteButton'], [class*='CommentButton'], [class*='BookmarkButton']"
+    ));
+
+    METRICS.forEach((metric) => {
+      for (const el of candidates) {
+        const label = el.getAttribute("aria-label") || "";
+        const text = el.textContent || "";
+        if (!metric.kw.test(label) && !metric.kw.test(text)) continue;
+        const n = firstNumber(text) || firstNumber(label);
+        if (n) { stats[metric.key] = n; break; }
+      }
+    });
+
+    // 兜底：老选择器（同样支持万/亿单位）
+    if (!stats.likes) {
+      const likeBtn = toolbar.querySelector('.VoteButton--up, .VoteButton--up .CountValue, [aria-label*="赞同"], [aria-label*="like"]');
+      if (likeBtn) stats.likes = firstNumber(likeBtn.textContent) || firstNumber(likeBtn.getAttribute("aria-label"));
+    }
+    if (!stats.comments) {
+      const commentBtn = toolbar.querySelector('button[aria-label*="评论"], button[aria-label*="comment"], .CommentButton');
+      if (commentBtn) stats.comments = firstNumber(commentBtn.textContent) || firstNumber(commentBtn.getAttribute("aria-label"));
+    }
+    if (!stats.bookmarks) {
+      const bookmarkBtn = toolbar.querySelector('button[aria-label*="收藏"], button[aria-label*="bookmark"], .BookmarkButton');
+      if (bookmarkBtn) stats.bookmarks = firstNumber(bookmarkBtn.textContent) || firstNumber(bookmarkBtn.getAttribute("aria-label"));
+    }
+    if (!stats.hearts) {
+      const heartBtn = toolbar.querySelector('button[aria-label*="喜欢"], button[aria-label*="heart"], button[aria-label*="Hearts"]');
+      if (heartBtn) stats.hearts = firstNumber(heartBtn.textContent) || firstNumber(heartBtn.getAttribute("aria-label"));
+    }
+
+    // 兜底：赞同数也从头部「N 万人赞同」取
+    if (!stats.likes) {
+      const voteEl = document.querySelector(".AnswerItem-voteInfo, .ContentItem-voteInfo, [class*='voteInfo']");
+      const m = voteEl && voteEl.textContent.match(/([\d][\d,.]*\s*[万亿]?)\s*人赞同/);
       if (m) stats.likes = parseCount(m[1]);
-    }
-
-    // 评论按钮
-    const commentBtn = toolbar.querySelector('button[aria-label*="评论"], button[aria-label*="comment"], .CommentButton');
-    if (commentBtn) {
-      const m = commentBtn.textContent.match(/([\d,.]+[KMB]?)/);
-      if (m) stats.comments = parseCount(m[1]);
-    }
-
-    // 收藏按钮
-    const bookmarkBtn = toolbar.querySelector('button[aria-label*="收藏"], button[aria-label*="bookmark"], .BookmarkButton');
-    if (bookmarkBtn) {
-      const m = bookmarkBtn.textContent.match(/([\d,.]+[KMB]?)/);
-      if (m) stats.bookmarks = parseCount(m[1]);
-    }
-
-    // 喜欢按钮 (❤)
-    const heartBtn = toolbar.querySelector('button[aria-label*="喜欢"], button[aria-label*="heart"], button[aria-label*="Hearts"]');
-    if (heartBtn) {
-      const m = heartBtn.textContent.match(/([\d,.]+[KMB]?)/);
-      if (m) stats.hearts = parseCount(m[1]);
     }
 
     return stats;
@@ -1244,6 +1268,19 @@
     if (!data) {
       data = pageType === "article" ? extractArticleData() : extractAnswerData();
       console.log("ZhihuCard: DOM extraction result=", data);
+    }
+
+    // initialData 里缺的指标用 DOM 工具栏补
+    if (data && data.stats) {
+      const domStats = extractStatsFromToolbarEl(
+        document.querySelector(".AnswerItem .ContentItem-actions")
+        || document.querySelector(".Post-Toolbox .ContentItem-actions")
+        || document.querySelector(".ContentItem-actions")
+        || document.querySelector(".RichContent-actions")
+      );
+      if (domStats) {
+        STAT_KEYS.forEach((k) => { if (!data.stats[k]) data.stats[k] = domStats[k]; });
+      }
     }
 
     if (data && (!data.images || data.images.length === 0)) {
