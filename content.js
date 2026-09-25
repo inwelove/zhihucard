@@ -64,6 +64,11 @@
     stat_hearts: "喜欢",
     statsRangeHint: "左边填区间（点赞单位万），点随机一键生成",
     statsAutoRandomLabel: "打开面板时自动随机一次",
+    paragraphGapLabel: "段落间距",
+    imageLayoutLabel: "图片布局",
+    imageLayoutAuto: "自动",
+    imageLayoutSingle: "单列",
+    imageLayoutMulti: "多列",
     watermarkTextLabel: "水印文字",
     watermarkOpacityLabel: "水印透明度",
     watermarkDensityLabel: "水印密度",
@@ -977,6 +982,15 @@
     try { chrome.storage.sync.set({ paragraphGap: !!value }); } catch (_) {}
   }
 
+  const IMAGE_LAYOUTS = ["auto", "single", "multi"];
+  function getImageLayoutSetting() {
+    return loadSetting("imageLayout", "auto").then((v) => (IMAGE_LAYOUTS.indexOf(v) >= 0 ? v : "auto"));
+  }
+  function saveImageLayout(value) {
+    const v = IMAGE_LAYOUTS.indexOf(value) >= 0 ? value : "auto";
+    storageSet({ imageLayout: v });
+  }
+
   const STAT_KEYS = ["likes", "comments", "bookmarks", "hearts"];
   const DEFAULT_STAT_RANGES = {
     likes: [3, 5],          // 单位：万
@@ -1300,7 +1314,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, statsAutoRandom, watermarkStyle, profilePresets] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, statsAutoRandom, watermarkStyle, profilePresets, imageLayout] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1320,6 +1334,7 @@
       getStatsAutoRandomSetting(),
       getWatermarkStyleSetting(),
       getProfilePresets(),
+      getImageLayoutSetting(),
     ]);
     if (!shell.host.isConnected) return;
     await applyUiLang(uiLang);
@@ -1347,6 +1362,7 @@
       watermarkOpacity: watermarkStyle.opacity,
       watermarkDensity: watermarkStyle.density,
       profilePresets,
+      imageLayout,
     });
   }
 
@@ -1500,6 +1516,7 @@
       wallpaperCardOpacity: (options.wallpaperCard && options.wallpaperCard.opacity) || 100,
       bgId: options.bgId || "aurora",
       paragraphGap: !!options.paragraphGap,
+      imageLayout: options.imageLayout || "auto",
       titleFontSize: options.titleFontSize || 22,
       bodyFontSize: options.bodyFontSize || 16,
       customAvatar: options.customAvatar || "",
@@ -1895,6 +1912,31 @@
       sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
       sec.appendChild(sidebarCheckbox(t("hideLinkLabel"), state.hideLink, (v) => { state.hideLink = v; saveHideLink(v); }));
       sec.appendChild(sidebarCheckbox(t("paragraphGapLabel"), state.paragraphGap, (v) => { state.paragraphGap = v; saveParagraphGap(v); }));
+
+      // 图片布局：自动 / 单列 / 多列
+      const layoutRow = document.createElement("div");
+      Object.assign(layoutRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
+      const layoutLbl = document.createElement("span");
+      Object.assign(layoutLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      layoutLbl.textContent = t("imageLayoutLabel");
+      const layoutSelect = document.createElement("select");
+      Object.assign(layoutSelect.style, {
+        flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
+        borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
+      });
+      [["auto", t("imageLayoutAuto")], ["single", t("imageLayoutSingle")], ["multi", t("imageLayoutMulti")]].forEach(([val, text]) => {
+        const opt = document.createElement("option");
+        opt.value = val; opt.textContent = text;
+        layoutSelect.appendChild(opt);
+      });
+      layoutSelect.value = state.imageLayout;
+      layoutSelect.addEventListener("change", () => {
+        state.imageLayout = layoutSelect.value;
+        saveImageLayout(state.imageLayout);
+        rebuildCard();
+      });
+      layoutRow.appendChild(layoutLbl); layoutRow.appendChild(layoutSelect);
+      sec.appendChild(layoutRow);
     }
 
     // ===== SIDEBAR: ENGAGEMENT STATS =====
@@ -2528,6 +2570,7 @@
         hideTime: state.hideTime, hideLink: state.hideLink,
         paragraphGap: state.paragraphGap, titleFontSize: state.titleFontSize,
         bodyFontSize: state.bodyFontSize, locale: effectiveLocale(),
+        imageLayout: state.imageLayout,
       };
       const exportEl = await buildExportEl(cardData, cardOptions);
       if (seq !== rebuildSeq || !host.isConnected) return;

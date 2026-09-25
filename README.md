@@ -10,7 +10,7 @@
 - 壁纸模式内置 7 张原创渐变背景，也支持上传自己的图片（最多 6 张）
 - 壁纸模式下卡片本体可以选白色或黑色，透明度 30%–100% 随意调
 - 一键翻译（谷歌翻译），方向自动：外语翻成中文，中文翻成外语
-- 图片完整显示：单图按原始比例，双图并排，三张以上网格布局
+- 图片完整显示：单图按原始比例，双图并排，三张以上网格布局；侧栏「图片布局」可切换 自动／单列／多列（单列=每张图占满整行竖排，多列=统一两列）
 - 可隐藏互动数据和时间
 - 「段落间距」：勾选后每个回车（段落）后补一个空行，与下一段隔开
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
@@ -75,7 +75,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - Wallpaper mode ships with 7 built-in original gradient backgrounds, or upload your own
 - In Wallpaper mode the card itself can be white or dark, with adjustable background opacity
 - One-click translation (via Google Translate), direction-aware
-- Images display in full layout (single, side-by-side, or grid)
+- Images display in full layout (single, side-by-side, or grid); the sidebar "Image layout" option switches between Auto / Single column (each image full width, stacked) / Multi column (uniform 2-column grid)
 - Optionally hide the engagement stats and the timestamp
 - "Paragraph spacing": when checked, every paragraph (line break) gets a blank line before the next one
 - Shows a "N people upvoted this answer" line under the author

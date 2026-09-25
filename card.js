@@ -320,16 +320,25 @@
     return holder;
   }
 
-  function layoutMediaGrid(urls) {
+  function layoutMediaGrid(urls, layout) {
     const n = urls.length;
     const wrap = el("div", { marginTop: "16px", borderRadius: "12px", overflow: "hidden" });
 
-    if (n === 1) {
-      Object.assign(wrap.style, { display: "block" });
-      wrap.appendChild(buildSingleImageTile(urls[0]));
+    // 单列：每张图占满整行，竖向堆叠
+    if (layout === "single" || n === 1) {
+      Object.assign(wrap.style, { display: "flex", flexDirection: "column", gap: "8px", overflow: "visible" });
+      urls.forEach((src) => wrap.appendChild(buildSingleImageTile(src)));
       return wrap;
     }
 
+    // 多列：≥2 张一律两列均匀网格
+    if (layout === "multi") {
+      Object.assign(wrap.style, { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" });
+      urls.forEach((src) => wrap.appendChild(buildGridTile(src)));
+      return wrap;
+    }
+
+    // 自动
     if (n === 2) {
       Object.assign(wrap.style, { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" });
       urls.forEach((src) => wrap.appendChild(buildGridTile(src)));
@@ -357,11 +366,11 @@
     return wrap;
   }
 
-  function buildMediaGrid(images) {
+  function buildMediaGrid(images, layout) {
     if (!images || !images.length) return null;
     const list = images.slice(0, 4);
     const urls = list.map((item) => item.url);
-    const wrap = layoutMediaGrid(urls);
+    const wrap = layoutMediaGrid(urls, layout);
     wrap.dataset.zhihucardMedia = String(list.length);
     return wrap;
   }
@@ -565,7 +574,7 @@
     card.appendChild(body);
 
     // ----- media -----
-    const media = buildMediaGrid(data.images);
+    const media = buildMediaGrid(data.images, options.imageLayout || "auto");
     if (media) card.appendChild(media);
 
     // ----- source URL -----
