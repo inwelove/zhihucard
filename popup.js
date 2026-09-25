@@ -24,6 +24,32 @@
     if (msg) el.alt = msg;
   });
 
+  // storage: 本地优先，sync 尽力同步（sync 在部分地区不可用且有 8KB 单条限制）
+  function getSetting(keys) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(keys, (local) => {
+          const out = Object.assign({}, local || {});
+          const missing = Object.keys(keys).filter((k) => out[k] === undefined);
+          if (!missing.length) return resolve(out);
+          try {
+            chrome.storage.sync.get(keys, (sync) => {
+              Object.assign(out, sync || {});
+              const migrated = {};
+              missing.forEach((k) => { if (out[k] !== undefined) migrated[k] = out[k]; });
+              if (Object.keys(migrated).length) chrome.storage.local.set(migrated, () => void chrome.runtime.lastError);
+              resolve(out);
+            });
+          } catch (_) { resolve(out); }
+        });
+      } catch (_) { resolve(keys); }
+    });
+  }
+  function setSetting(obj) {
+    try { chrome.storage.local.set(obj, () => void chrome.runtime.lastError); } catch (_) {}
+    try { chrome.storage.sync.set(obj, () => void chrome.runtime.lastError); } catch (_) {}
+  }
+
   // ----- watermark toggle -----
   const toggle = document.getElementById("watermarkToggle");
 
@@ -31,13 +57,13 @@
     if (toggle) toggle.classList.toggle("active", !!on);
   }
 
-  chrome.storage.sync.get({ watermark: false }, (res) => paintToggle(res.watermark));
+  getSetting({ watermark: false }).then((res) => paintToggle(res.watermark));
 
   if (toggle) {
     toggle.addEventListener("click", () => {
       const next = !toggle.classList.contains("active");
       paintToggle(next);
-      chrome.storage.sync.set({ watermark: next });
+      setSetting({ watermark: next });
     });
   }
 
@@ -50,14 +76,14 @@
     if (themeIcon) themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
   }
 
-  chrome.storage.sync.get({ popupTheme: "dark" }, (res) => applyTheme(res.popupTheme === "light" ? "light" : "dark"));
+  getSetting({ popupTheme: "dark" }).then((res) => applyTheme(res.popupTheme === "light" ? "light" : "dark"));
 
   if (themeSwitch) {
     themeSwitch.addEventListener("click", () => {
       const current = document.documentElement.getAttribute("data-theme");
       const next = current === "dark" ? "light" : "dark";
       applyTheme(next);
-      chrome.storage.sync.set({ popupTheme: next });
+      setSetting({ popupTheme: next });
     });
   }
 

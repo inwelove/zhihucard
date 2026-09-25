@@ -768,14 +768,38 @@
   // Settings
   // ============================================================
 
-  function getWatermarkSetting() {
+  // 本地优先的读写：storage.local 一定可用且容量大（sync 在部分地区不可用，
+  // 且单条 8KB 限制装不下头像 dataURL），sync 只做尽力同步/迁移。
+  function storageGetLocal(keys) {
     return new Promise((resolve) => {
-      try {
-        chrome.storage.sync.get({ watermark: false }, (res) => resolve(!!res.watermark));
-      } catch (_) {
-        resolve(false);
-      }
+      try { chrome.storage.local.get(keys, (res) => resolve(res || {})); }
+      catch (_) { resolve({}); }
     });
+  }
+  function storageGetSync(keys) {
+    return new Promise((resolve) => {
+      try { chrome.storage.sync.get(keys, (res) => resolve(res || {})); }
+      catch (_) { resolve({}); }
+    });
+  }
+  function storageSet(obj) {
+    try { chrome.storage.local.set(obj, () => void chrome.runtime.lastError); } catch (_) {}
+    try { chrome.storage.sync.set(obj, () => void chrome.runtime.lastError); } catch (_) {}
+  }
+  async function loadSetting(key, fallback) {
+    const local = await storageGetLocal({ [key]: null });
+    if (local[key] !== null && local[key] !== undefined) return local[key];
+    const sync = await storageGetSync({ [key]: fallback });
+    const v = sync[key] !== undefined && sync[key] !== null ? sync[key] : fallback;
+    storageSet({ [key]: v });
+    return v;
+  }
+
+  async function getWatermarkSetting() {
+    return !!(await loadSetting("watermark", false));
+  }
+  function saveWatermarkSetting(value) {
+    storageSet({ watermark: !!value });
   }
 
   const VALID_STYLES = ["white", "dark", "warm", "cool", "paper", "minimal", "cherry", "tianya", "retro", "matcha", "chocolate", "blueberry", "redTeal", "wallpaper"];
@@ -964,36 +988,24 @@
   }
 
   function getCustomAvatarSetting() {
-    return new Promise((resolve) => {
-      try {
-        chrome.storage.sync.get({ customAvatar: "" }, (res) => resolve(typeof res.customAvatar === "string" ? res.customAvatar : ""));
-      } catch (_) { resolve(""); }
-    });
+    return loadSetting("customAvatar", "").then((v) => (typeof v === "string" ? v : ""));
   }
   function saveCustomAvatar(value) {
-    try { chrome.storage.sync.set({ customAvatar: typeof value === "string" ? value : "" }); } catch (_) {}
+    storageSet({ customAvatar: typeof value === "string" ? value : "" });
   }
 
   function getCustomNicknameSetting() {
-    return new Promise((resolve) => {
-      try {
-        chrome.storage.sync.get({ customNickname: "" }, (res) => resolve(typeof res.customNickname === "string" ? res.customNickname : ""));
-      } catch (_) { resolve(""); }
-    });
+    return loadSetting("customNickname", "").then((v) => (typeof v === "string" ? v : ""));
   }
   function saveCustomNickname(value) {
-    try { chrome.storage.sync.set({ customNickname: typeof value === "string" ? value : "" }); } catch (_) {}
+    storageSet({ customNickname: typeof value === "string" ? value : "" });
   }
 
   function getCustomSignatureSetting() {
-    return new Promise((resolve) => {
-      try {
-        chrome.storage.sync.get({ customSignature: "" }, (res) => resolve(typeof res.customSignature === "string" ? res.customSignature : ""));
-      } catch (_) { resolve(""); }
-    });
+    return loadSetting("customSignature", "").then((v) => (typeof v === "string" ? v : ""));
   }
   function saveCustomSignature(value) {
-    try { chrome.storage.sync.set({ customSignature: typeof value === "string" ? value : "" }); } catch (_) {}
+    storageSet({ customSignature: typeof value === "string" ? value : "" });
   }
 
   const VALID_CARD_THEMES = ["white", "dark", "warm", "cool", "paper", "minimal", "cherry", "tianya", "retro", "matcha", "chocolate", "blueberry", "redTeal"];
@@ -1084,13 +1096,14 @@
     return "aurora";
   }
 
-  function resizeImageFileToDataUrl(file) {
+  function resizeImageFileToDataUrl(file, maxSide) {
+    maxSide = maxSide || 2400;
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
-          const MAX_SIDE = 2400;
+          const MAX_SIDE = maxSide;
           let { width, height } = img;
           if (width > MAX_SIDE || height > MAX_SIDE) {
             if (width >= height) {
@@ -1142,6 +1155,10 @@
   }
 
   function closeModal(host) {
+    if (host && host.__zhihuStorage) {
+      try { chrome.storage.onChanged.removeListener(host.__zhihuStorage); } catch (_) {}
+      host.__zhihuStorage = null;
+    }
     if (host && host.parentNode) host.parentNode.removeChild(host);
     document.removeEventListener("keydown", host.__zhihuEsc, true);
     if (host.__zhihuResize) window.removeEventListener("resize", host.__zhihuResize);
@@ -1368,6 +1385,7 @@
       hideStats: !!options.hideStats,
       hideTime: !!options.hideTime,
       hideLink: !!options.hideLink,
+      watermark: !!options.watermark,
       wallpaperCardTheme: (options.wallpaperCard && options.wallpaperCard.theme) || "white",
       wallpaperCardOpacity: (options.wallpaperCard && options.wallpaperCard.opacity) || 100,
       bgId: options.bgId || "aurora",
@@ -1386,6 +1404,45 @@
       statsRanges: (options.likesCfg && options.likesCfg.ranges) || DEFAULT_STAT_RANGES,
       exportEl: null,
     };
+
+    // 外部改动（如弹窗开关水印）时同步刷新卡片
+    shell.host.__zhihuStorage = (changes) => {
+      let dirty = false;
+      if (changes.watermark) {
+        const v = !!changes.watermark.newValue;
+        if (v !== state.watermark) {
+          state.watermark = v;
+          if (state.watermarkCheckboxEl) state.watermarkCheckboxEl.checked = v;
+          dirty = true;
+        }
+      }
+      if (changes.customNickname) {
+        const v = typeof changes.customNickname.newValue === "string" ? changes.customNickname.newValue : "";
+        if (v !== state.customNickname) {
+          state.customNickname = v;
+          if (state.nicknameInputEl) state.nicknameInputEl.value = v;
+          dirty = true;
+        }
+      }
+      if (changes.customSignature) {
+        const v = typeof changes.customSignature.newValue === "string" ? changes.customSignature.newValue : "";
+        if (v !== state.customSignature) {
+          state.customSignature = v;
+          if (state.signatureInputEl) state.signatureInputEl.value = v;
+          dirty = true;
+        }
+      }
+      if (changes.customAvatar) {
+        const v = typeof changes.customAvatar.newValue === "string" ? changes.customAvatar.newValue : "";
+        if (v !== state.customAvatar) {
+          state.customAvatar = v;
+          if (state.avatarPreviewPaint) state.avatarPreviewPaint();
+          dirty = true;
+        }
+      }
+      if (dirty) rebuildCard();
+    };
+    try { chrome.storage.onChanged.addListener(shell.host.__zhihuStorage); } catch (_) {}
 
     // ===== SIDEBAR BUILDER HELPERS =====
     function sidebarSection(title) {
@@ -1619,6 +1676,9 @@
     // ===== SIDEBAR: OPTIONS =====
     {
       const sec = sidebarSection(t("optionsLabel"));
+      const wmLabel = sidebarCheckbox(t("watermarkLabel"), state.watermark, (v) => { state.watermark = v; saveWatermarkSetting(v); });
+      sec.appendChild(wmLabel);
+      state.watermarkCheckboxEl = wmLabel.querySelector("input");
       sec.appendChild(sidebarCheckbox(t("hideStatsLabel"), state.hideStats, (v) => { state.hideStats = v; saveHideStats(v); }));
       sec.appendChild(sidebarCheckbox(t("hideTimeLabel"), state.hideTime, (v) => { state.hideTime = v; saveHideTime(v); }));
       sec.appendChild(sidebarCheckbox(t("hideLinkLabel"), state.hideLink, (v) => { state.hideLink = v; saveHideLink(v); }));
@@ -1837,6 +1897,12 @@
         flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
         borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
       });
+      let nickTimer = 0;
+      nickInput.addEventListener("input", () => {
+        state.customNickname = nickInput.value;
+        clearTimeout(nickTimer);
+        nickTimer = setTimeout(() => saveCustomNickname(state.customNickname), 400);
+      });
       nickInput.addEventListener("change", () => {
         state.customNickname = nickInput.value;
         saveCustomNickname(state.customNickname);
@@ -1844,6 +1910,7 @@
       });
       nickRow.appendChild(nickLbl); nickRow.appendChild(nickInput);
       sec.appendChild(nickRow);
+      state.nicknameInputEl = nickInput;
 
       const sigRow = document.createElement("div");
       Object.assign(sigRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0" });
@@ -1858,6 +1925,12 @@
         flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
         borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
       });
+      let sigTimer = 0;
+      sigInput.addEventListener("input", () => {
+        state.customSignature = sigInput.value;
+        clearTimeout(sigTimer);
+        sigTimer = setTimeout(() => saveCustomSignature(state.customSignature), 400);
+      });
       sigInput.addEventListener("change", () => {
         state.customSignature = sigInput.value;
         saveCustomSignature(state.customSignature);
@@ -1865,6 +1938,7 @@
       });
       sigRow.appendChild(sigLbl); sigRow.appendChild(sigInput);
       sec.appendChild(sigRow);
+      state.signatureInputEl = sigInput;
 
       const avatarRow = document.createElement("div");
       Object.assign(avatarRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "4px 0", marginTop: "4px", flexWrap: "wrap" });
@@ -1899,10 +1973,11 @@
         const file = fileInput.files && fileInput.files[0];
         if (!file) return;
         try {
-          const dataUrl = await resizeImageFileToDataUrl(file);
+          const dataUrl = await resizeImageFileToDataUrl(file, 512);
           state.customAvatar = dataUrl;
           saveCustomAvatar(dataUrl);
-          paintAvatarPreview();
+      paintAvatarPreview();
+      state.avatarPreviewPaint = paintAvatarPreview;
           rebuildCard();
         } catch (_) {
           // ignore upload failures
@@ -2107,7 +2182,7 @@
         cardData.stats = merged;
       }
       const cardOptions = {
-        watermark: options.watermark, hideStats: state.hideStats,
+        watermark: state.watermark, hideStats: state.hideStats,
         hideTime: state.hideTime, hideLink: state.hideLink,
         paragraphGap: state.paragraphGap, titleFontSize: state.titleFontSize,
         bodyFontSize: state.bodyFontSize, locale: effectiveLocale(),
