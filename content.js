@@ -62,6 +62,7 @@
     stat_comments: "评论",
     stat_bookmarks: "收藏",
     stat_hearts: "喜欢",
+    statsRangeHint: "左边填区间（点赞单位万），点随机一键生成",
     editTextLabel: "编辑文案",
     editTextPlaceholder: "直接修改卡片正文内容…",
     editRestoreBtn: "恢复原文",
@@ -874,12 +875,26 @@
   }
 
   const STAT_KEYS = ["likes", "comments", "bookmarks", "hearts"];
+  const DEFAULT_STAT_RANGES = {
+    likes: [3, 5],          // 单位：万
+    comments: [500, 3000],
+    bookmarks: [100, 1500],
+    hearts: [50, 800],
+  };
+
+  function normalizeRange(lo, hi) {
+    lo = Number(lo); hi = Number(hi);
+    if (!isFinite(lo) || lo < 0) lo = 0;
+    if (!isFinite(hi) || hi < 0) hi = 0;
+    if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
+    return [lo, hi];
+  }
 
   function getStatsOverrideSetting() {
-    const defaults = { likes: 0, comments: 0, bookmarks: 0, hearts: 0, likesRandomMin: 3, likesRandomMax: 5 };
+    const defaults = { likes: 0, comments: 0, bookmarks: 0, hearts: 0, ranges: DEFAULT_STAT_RANGES };
     return new Promise((resolve) => {
       try {
-        chrome.storage.sync.get({ statsOverride: null, likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }, (res) => {
+        chrome.storage.sync.get({ statsOverride: null, statsRanges: null, likesOverride: 0, likesRandomMin: 3, likesRandomMax: 5 }, (res) => {
           const hasSaved = res.statsOverride && typeof res.statsOverride === "object";
           const saved = hasSaved ? res.statsOverride : {};
           const out = {
@@ -887,9 +902,14 @@
             comments: Number(saved.comments) || 0,
             bookmarks: Number(saved.bookmarks) || 0,
             hearts: Number(saved.hearts) || 0,
-            likesRandomMin: Number(res.likesRandomMin) || defaults.likesRandomMin,
-            likesRandomMax: Number(res.likesRandomMax) || defaults.likesRandomMax,
+            ranges: {},
           };
+          STAT_KEYS.forEach((k) => {
+            const r = res.statsRanges && res.statsRanges[k];
+            if (Array.isArray(r) && r.length === 2) out.ranges[k] = normalizeRange(r[0], r[1]);
+            else if (k === "likes") out.ranges[k] = normalizeRange(res.likesRandomMin, res.likesRandomMax);
+            else out.ranges[k] = DEFAULT_STAT_RANGES[k].slice();
+          });
           resolve(out);
         });
       } catch (_) { resolve(defaults); }
@@ -902,8 +922,12 @@
       chrome.storage.sync.set({ statsOverride: out });
     } catch (_) {}
   }
-  function saveLikesRandomRange(min, max) {
-    try { chrome.storage.sync.set({ likesRandomMin: Number(min) || 3, likesRandomMax: Number(max) || 5 }); } catch (_) {}
+  function saveStatsRanges(ranges) {
+    try {
+      const out = {};
+      STAT_KEYS.forEach((k) => { out[k] = (ranges[k] || [0, 0]).slice(); });
+      chrome.storage.sync.set({ statsRanges: out });
+    } catch (_) {}
   }
 
   function getTitleFontSizeSetting() {
@@ -1359,8 +1383,7 @@
         bookmarks: (options.likesCfg && options.likesCfg.bookmarks) || 0,
         hearts: (options.likesCfg && options.likesCfg.hearts) || 0,
       },
-      likesRandomMin: (options.likesCfg && options.likesCfg.likesRandomMin) || 3,
-      likesRandomMax: (options.likesCfg && options.likesCfg.likesRandomMax) || 5,
+      statsRanges: (options.likesCfg && options.likesCfg.ranges) || DEFAULT_STAT_RANGES,
       exportEl: null,
     };
 
@@ -1626,71 +1649,96 @@
         inp.placeholder = t("likesOriginalLabel");
         Object.assign(inp.style, {
           width: width, background: "#2d2d44", border: "1px solid #444",
-          borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "5px 6px", outline: "none",
+          borderRadius: "6px", color: "#e0e0e0", fontSize: "12px", padding: "5px 4px", outline: "none",
         });
         return inp;
       }
 
-      // 随机范围(万) — 紧跟在标题下面
-      const rangeRow = document.createElement("div");
-      Object.assign(rangeRow.style, { display: "flex", alignItems: "center", gap: "6px", padding: "2px 0 6px", flexWrap: "wrap" });
-      const rangeLbl = document.createElement("span");
-      Object.assign(rangeLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
-      rangeLbl.textContent = t("likesRangeLabel");
-      const minInput = makeNumInput(0, "54px");
-      minInput.step = "0.1";
-      minInput.value = String(state.likesRandomMin);
-      const sep = document.createElement("span");
-      Object.assign(sep.style, { fontSize: "12px", color: "#888" });
-      sep.textContent = "–";
-      const maxInput = makeNumInput(0, "54px");
-      maxInput.step = "0.1";
-      maxInput.value = String(state.likesRandomMax);
-      rangeRow.appendChild(rangeLbl);
-      rangeRow.appendChild(minInput);
-      rangeRow.appendChild(sep);
-      rangeRow.appendChild(maxInput);
+      const rowStyle = { display: "flex", alignItems: "center", gap: "4px", padding: "3px 0" };
+      const labelStyle = { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap", width: "34px", flexShrink: "0" };
+      const sepStyle = { fontSize: "12px", color: "#888", flexShrink: "0" };
 
-      function readRange() {
-        let lo = Number(minInput.value); let hi = Number(maxInput.value);
-        if (!isFinite(lo) || lo < 0) lo = 3;
-        if (!isFinite(hi) || hi < 0) hi = 5;
-        if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
-        minInput.value = String(lo); maxInput.value = String(hi);
-        state.likesRandomMin = lo; state.likesRandomMax = hi;
-        saveLikesRandomRange(lo, hi);
-        return [Math.round(lo * 10000), Math.round(hi * 10000)];
-      }
-
-      // 每个统计项一行
-      const statInputs = {};
+      // 每个指标一行：[标签] [最小] – [最大](万) [数值]
+      const statControls = {};
       STAT_KEYS.forEach((key) => {
         const row = document.createElement("div");
-        Object.assign(row.style, { display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" });
+        Object.assign(row.style, rowStyle);
+
         const lbl = document.createElement("span");
-        Object.assign(lbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap", minWidth: "42px" });
+        Object.assign(lbl.style, labelStyle);
         lbl.textContent = t("stat_" + key);
-        const inp = makeNumInput(state.statsOverride[key], "88px");
-        inp.addEventListener("change", () => {
-          state.statsOverride[key] = Math.max(0, Math.round(Number(inp.value) || 0));
-          inp.value = state.statsOverride[key] > 0 ? String(state.statsOverride[key]) : "";
+
+        const range = state.statsRanges[key];
+        const minInput = makeNumInput(0, "44px");
+        minInput.value = range[0] > 0 ? String(range[0]) : "0";
+        minInput.placeholder = "0";
+        const sep = document.createElement("span");
+        Object.assign(sep.style, sepStyle);
+        sep.textContent = "–";
+        const maxInput = makeNumInput(0, "44px");
+        maxInput.value = range[1] > 0 ? String(range[1]) : "0";
+        maxInput.placeholder = "0";
+
+        const unit = document.createElement("span");
+        Object.assign(unit.style, { fontSize: "11px", color: "#888", flexShrink: "0" });
+        unit.textContent = key === "likes" ? "万" : "";
+
+        const valueInput = makeNumInput(state.statsOverride[key], "62px");
+
+        function commitRange() {
+          let lo = Number(minInput.value); let hi = Number(maxInput.value);
+          if (!isFinite(lo) || lo < 0) lo = 0;
+          if (!isFinite(hi) || hi < 0) hi = 0;
+          if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
+          minInput.value = String(lo); maxInput.value = String(hi);
+          state.statsRanges[key] = [lo, hi];
+          saveStatsRanges(state.statsRanges);
+        }
+        minInput.addEventListener("change", commitRange);
+        maxInput.addEventListener("change", commitRange);
+
+        valueInput.addEventListener("change", () => {
+          state.statsOverride[key] = Math.max(0, Math.round(Number(valueInput.value) || 0));
+          valueInput.value = state.statsOverride[key] > 0 ? String(state.statsOverride[key]) : "";
           saveStatsOverride(state.statsOverride);
           rebuildCard();
         });
-        statInputs[key] = inp;
-        row.appendChild(lbl); row.appendChild(inp);
+
+        statControls[key] = { minInput, maxInput, valueInput };
+
+        row.appendChild(lbl);
+        row.appendChild(minInput);
+        row.appendChild(sep);
+        row.appendChild(maxInput);
+        row.appendChild(unit);
+        row.appendChild(valueInput);
         sec.appendChild(row);
       });
 
+      const hint = document.createElement("div");
+      Object.assign(hint.style, { fontSize: "11px", color: "#888", marginTop: "4px" });
+      hint.textContent = t("statsRangeHint");
+      sec.appendChild(hint);
+
       const btnRow = document.createElement("div");
-      Object.assign(btnRow.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" });
+      Object.assign(btnRow.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" });
       const randBtn = makeBtn(t("likesRandomBtn"), true);
       randBtn.addEventListener("click", () => {
-        const [loN, hiN] = readRange();
         STAT_KEYS.forEach((key) => {
+          const ctl = statControls[key];
+          let lo = Number(ctl.minInput.value); let hi = Number(ctl.maxInput.value);
+          if (!isFinite(lo) || lo < 0) lo = 0;
+          if (!isFinite(hi) || hi < 0) hi = 0;
+          if (lo > hi) { const tmp = lo; lo = hi; hi = tmp; }
+          ctl.minInput.value = String(lo); ctl.maxInput.value = String(hi);
+          state.statsRanges[key] = [lo, hi];
+          const factor = key === "likes" ? 10000 : 1;
+          const loN = Math.round(lo * factor);
+          const hiN = Math.round(hi * factor);
           state.statsOverride[key] = loN + Math.floor(Math.random() * (hiN - loN + 1));
-          statInputs[key].value = String(state.statsOverride[key]);
+          ctl.valueInput.value = state.statsOverride[key] > 0 ? String(state.statsOverride[key]) : "";
         });
+        saveStatsRanges(state.statsRanges);
         saveStatsOverride(state.statsOverride);
         rebuildCard();
       });
@@ -1698,7 +1746,7 @@
       resetBtn.addEventListener("click", () => {
         STAT_KEYS.forEach((key) => {
           state.statsOverride[key] = 0;
-          statInputs[key].value = "";
+          statControls[key].valueInput.value = "";
         });
         saveStatsOverride(state.statsOverride);
         rebuildCard();

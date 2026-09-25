@@ -73,6 +73,7 @@
   "stat_comments": { "message": "评论" },
   "stat_bookmarks": { "message": "收藏" },
   "stat_hearts": { "message": "喜欢" },
+  "statsRangeHint": { "message": "左边填区间（点赞单位万），点随机一键生成" },
   "editTextLabel": { "message": "编辑文案" },
   "editTextPlaceholder": { "message": "直接修改卡片正文内容…" },
   "editRestoreBtn": { "message": "恢复原文" },

@@ -14,7 +14,7 @@
 - 可隐藏互动数据和时间
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
 - 赞同数可手动改写：设定随机范围（默认 3–5 万），点「随机」生成，点「还原」恢复原数据
-- 「互动数据」整块可编辑：点赞／评论／收藏／喜欢都能手填数字，随机范围(万)在标题下方，「随机」一键全部生成、「还原」全部恢复
+- 「互动数据」整块可编辑：点赞／评论／收藏／喜欢每项都能手填数字，也能各设一个随机区间（点赞单位万），「随机」按各自区间一键全部生成、「还原」全部恢复
 - 侧栏「编辑文案」可直接改写卡片正文，改完自动刷新预览，可一键恢复原文
 - 界面语言自动跟随浏览器，弹窗右上角也能手动一键切换中／English
 - 支持下载 PNG，或直接复制图片到剪贴板
@@ -75,7 +75,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - Optionally hide the engagement stats and the timestamp
 - Shows a "N people upvoted this answer" line under the author
 - Overwrite the upvote count — set a random range (default 30k–50k), hit Random, or restore the real number
-- The whole engagement stats block is editable: likes, comments, bookmarks, and hearts take manual numbers; range sits under the heading; Random fills all four, Reset restores the page values
+- The whole engagement stats block is editable: each metric (likes, comments, bookmarks, hearts) takes a manual number or its own random range (likes in 10k units); Random fills all four per their ranges, Reset restores the page values
 - Edit the card body text directly from the sidebar; the preview refreshes as you type
 - UI follows your browser language with manual toggle
 - Download as PNG, or copy to clipboard
