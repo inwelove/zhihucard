@@ -11,6 +11,7 @@
 - 壁纸模式下卡片本体可以选白色或黑色，透明度 30%–100% 随意调
 - 一键翻译（谷歌翻译），方向自动：外语翻成中文，中文翻成外语
 - 图片完整显示：单图按原始比例，双图并排，三张以上网格布局；侧栏「图片布局」可切换 自动／单列／多列（单列=每张图占满整行竖排，多列=统一两列）
+- 长图自动分页：卡片过长（高度超过约 2400px）时，点「下载 PNG」自动切成最多 4 张，每张带 24px 上下左右页边距，切点自动避开正文行和图片，颜色／字体／字号／背景全部一致（选项里可开关）
 - 可隐藏互动数据和时间
 - 「段落间距」：勾选后每个回车（段落）后补一个空行，与下一段隔开
 - 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
@@ -76,6 +77,7 @@ Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or a
 - In Wallpaper mode the card itself can be white or dark, with adjustable background opacity
 - One-click translation (via Google Translate), direction-aware
 - Images display in full layout (single, side-by-side, or grid); the sidebar "Image layout" option switches between Auto / Single column (each image full width, stacked) / Multi column (uniform 2-column grid)
+- Auto-paging for long cards: when the card is taller than ~2400px, "Download PNG" automatically splits it into up to 4 images, each with a 24px margin on all sides; cuts snap to text lines and image edges, and colors/fonts/sizes/backgrounds stay identical (toggle in options)
 - Optionally hide the engagement stats and the timestamp
 - "Paragraph spacing": when checked, every paragraph (line break) gets a blank line before the next one
 - Shows a "N people upvoted this answer" line under the author

@@ -44,6 +44,7 @@
   "imageLayoutAuto": { "message": "自动" },
   "imageLayoutSingle": { "message": "单列" },
   "imageLayoutMulti": { "message": "多列" },
+  "autoSplitLabel": { "message": "长图自动切4张（下载时）" },
   "titleFontSizeLabel": { "message": "标题字号" },
   "bodyFontSizeLabel": { "message": "正文字号" },
   "hideLinkLabel": { "message": "隐藏原文链接" },

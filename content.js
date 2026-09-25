@@ -69,6 +69,7 @@
     imageLayoutAuto: "自动",
     imageLayoutSingle: "单列",
     imageLayoutMulti: "多列",
+    autoSplitLabel: "长图自动切4张（下载时）",
     watermarkTextLabel: "水印文字",
     watermarkOpacityLabel: "水印透明度",
     watermarkDensityLabel: "水印密度",
@@ -991,6 +992,102 @@
     storageSet({ imageLayout: v });
   }
 
+  // 长图自动切 4 张
+  const SPLIT_THRESHOLD_CSS = 2400; // 卡片 CSS 高度超过此值才切
+  const SPLIT_MAX = 4;
+  const SPLIT_MARGIN_CSS = 24; // 每张图上下左右页边距
+
+  function getAutoSplitSetting() {
+    return loadSetting("autoSplit", true).then((v) => v !== false);
+  }
+  function saveAutoSplit(value) {
+    storageSet({ autoSplit: !!value });
+  }
+
+  // 找安全切点：块级元素边界 + 正文行网格（避免从文字/图片中间切断）
+  function measureSafeCuts(cardEl, cssHeight, n) {
+    const clone = cardEl.cloneNode(true);
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, { position: "fixed", left: "-9999px", top: "0" });
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+    const base = clone.getBoundingClientRect().top;
+    const candidates = [];
+    clone.querySelectorAll("*").forEach((elm) => {
+      const r = elm.getBoundingClientRect();
+      if (r.height <= 0 || r.width <= 0) return;
+      candidates.push(r.top - base, r.bottom - base);
+    });
+    const tb = clone.querySelector('[data-zhihucard-role="text-original"], [data-zhihucard-role="text-translated"]');
+    if (tb) {
+      const cs = getComputedStyle(tb);
+      const fs = parseFloat(cs.fontSize) || 16;
+      const lh = parseFloat(cs.lineHeight) || fs * 1.75;
+      const r = tb.getBoundingClientRect();
+      const lines = Math.max(1, Math.round(r.height / lh));
+      for (let k = 1; k < lines; k++) candidates.push(r.top - base + k * lh);
+    }
+    document.body.removeChild(wrap);
+
+    const sliceH = cssHeight / n;
+    const win = Math.max(60, sliceH * 0.25);
+    const cuts = [];
+    for (let i = 1; i < n; i++) {
+      const target = sliceH * i;
+      let best = target, bestD = Infinity;
+      for (const c of candidates) {
+        if (c <= 10 || c >= cssHeight - 10) continue;
+        const d = Math.abs(c - target);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      cuts.push(bestD <= win ? best : target);
+    }
+    for (let i = 1; i < cuts.length; i++) {
+      if (cuts[i] <= cuts[i - 1] + 120) cuts[i] = cuts[i - 1] + 120;
+      if (cuts[i] > cssHeight - 120) cuts[i] = cssHeight - 120;
+    }
+    return cuts.filter((c) => c > 0 && c < cssHeight);
+  }
+
+  // 把整张长图按切点分成多张，每张带页边距；壁纸模式用原图边缘延展背景
+  function sliceCanvas(srcCanvas, cutsCss, scale, cardEl) {
+    const devW = srcCanvas.width, devH = srcCanvas.height;
+    const m = Math.round(SPLIT_MARGIN_CSS * scale);
+    const isWallpaper = !!(cardEl && cardEl.dataset && cardEl.dataset.zhihucardRole === "wallpaper-frame");
+    let bg = "#ffffff";
+    try {
+      const cs = getComputedStyle(cardEl);
+      if (cs && cs.backgroundColor && cs.backgroundColor !== "transparent" && cs.backgroundColor !== "rgba(0, 0, 0, 0)") bg = cs.backgroundColor;
+    } catch (_) {}
+    const bounds = (cutsCss || []).map((c) => Math.round(c * scale)).filter((c) => c > 0 && c < devH);
+    bounds.push(devH);
+    const out = [];
+    let start = 0;
+    for (const end of bounds) {
+      const h = end - start;
+      if (h <= 0) continue;
+      const c = document.createElement("canvas");
+      c.width = devW + m * 2;
+      c.height = h + m * 2;
+      const ctx = c.getContext("2d");
+      if (isWallpaper) {
+        const sx = Math.min(2, devW), sy = Math.min(2, h);
+        ctx.drawImage(srcCanvas, 0, start, devW, sy, 0, 0, devW, m);                      // 上边
+        ctx.drawImage(srcCanvas, 0, end - sy, devW, sy, 0, m + h, devW, m);                // 下边
+        ctx.drawImage(srcCanvas, 0, start, sx, h, 0, m, m, h);                             // 左边
+        ctx.drawImage(srcCanvas, devW - sx, start, sx, h, m + devW, m, m, h);              // 右边
+        ctx.drawImage(srcCanvas, 0, start, devW, h, m, m, devW, h);                        // 正片
+      } else {
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(srcCanvas, 0, start, devW, h, m, m, devW, h);
+      }
+      out.push(c);
+      start = end;
+    }
+    return out;
+  }
+
   const STAT_KEYS = ["likes", "comments", "bookmarks", "hearts"];
   const DEFAULT_STAT_RANGES = {
     likes: [3, 5],          // 单位：万
@@ -1314,7 +1411,7 @@
         if (domImages.length > 0) data.images = domImages;
       }
     }
-    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, statsAutoRandom, watermarkStyle, profilePresets, imageLayout] = await Promise.all([
+    const [watermark, style, customBgs, hideStats, hideTime, savedBgId, uiLang, wallpaperCard, paragraphGap, titleFontSize, bodyFontSize, hideLink, customAvatar, customNickname, customSignature, statsCfg, statsAutoRandom, watermarkStyle, profilePresets, imageLayout, autoSplit] = await Promise.all([
       getWatermarkSetting(),
       getSavedStyle(),
       getCustomBackgrounds(),
@@ -1335,6 +1432,7 @@
       getWatermarkStyleSetting(),
       getProfilePresets(),
       getImageLayoutSetting(),
+      getAutoSplitSetting(),
     ]);
     if (!shell.host.isConnected) return;
     await applyUiLang(uiLang);
@@ -1363,6 +1461,7 @@
       watermarkDensity: watermarkStyle.density,
       profilePresets,
       imageLayout,
+      autoSplit,
     });
   }
 
@@ -1517,6 +1616,7 @@
       bgId: options.bgId || "aurora",
       paragraphGap: !!options.paragraphGap,
       imageLayout: options.imageLayout || "auto",
+      autoSplit: options.autoSplit !== false,
       titleFontSize: options.titleFontSize || 22,
       bodyFontSize: options.bodyFontSize || 16,
       customAvatar: options.customAvatar || "",
@@ -1937,6 +2037,9 @@
       });
       layoutRow.appendChild(layoutLbl); layoutRow.appendChild(layoutSelect);
       sec.appendChild(layoutRow);
+
+      // 长图自动切 4 张
+      sec.appendChild(sidebarCheckbox(t("autoSplitLabel"), state.autoSplit, (v) => { state.autoSplit = v; saveAutoSplit(v); }));
     }
 
     // ===== SIDEBAR: ENGAGEMENT STATS =====
@@ -2451,8 +2554,23 @@
       downloadBtn.addEventListener("click", async () => {
         downloadBtn.textContent = t("downloadGeneratingText"); downloadBtn.disabled = true;
         try {
-          const { dataUrl } = await window.ZhihuCard.renderCardToPng(state.exportEl, 2);
-          const a = document.createElement("a"); a.href = dataUrl; a.download = buildFilename(data.author); a.click();
+          const { canvas, dataUrl } = await window.ZhihuCard.renderCardToPng(state.exportEl, 2);
+          const cssH = canvas.height / 2;
+          if (state.autoSplit && cssH > SPLIT_THRESHOLD_CSS) {
+            const cuts = measureSafeCuts(state.exportEl, cssH, SPLIT_MAX);
+            const slices = sliceCanvas(canvas, cuts, 2, state.exportEl);
+            const base = buildFilename(data.author).replace(/\.png$/i, "");
+            for (let i = 0; i < slices.length; i++) {
+              const url = slices[i].toDataURL("image/png");
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${base}-${i + 1}of${slices.length}.png`;
+              a.click();
+              await new Promise((r) => setTimeout(r, 400));
+            }
+          } else {
+            const a = document.createElement("a"); a.href = dataUrl; a.download = buildFilename(data.author); a.click();
+          }
         } catch (e) { downloadBtn.textContent = t("renderFailedText"); setTimeout(() => { downloadBtn.textContent = t("downloadPngButton"); downloadBtn.disabled = false; }, 1500); return; }
         downloadBtn.textContent = t("downloadPngButton"); downloadBtn.disabled = false;
       });

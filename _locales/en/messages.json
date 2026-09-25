@@ -44,6 +44,7 @@
   "imageLayoutAuto": { "message": "Auto" },
   "imageLayoutSingle": { "message": "Single column" },
   "imageLayoutMulti": { "message": "Multi column" },
+  "autoSplitLabel": { "message": "Auto-split long card into 4 (on download)" },
   "titleFontSizeLabel": { "message": "Title size" },
   "bodyFontSizeLabel": { "message": "Body size" },
   "hideLinkLabel": { "message": "Hide source link" },
