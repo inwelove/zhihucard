@@ -12,6 +12,7 @@
 - 一键翻译（谷歌翻译），方向自动：外语翻成中文，中文翻成外语
 - 图片完整显示：单图按原始比例，双图并排，三张以上网格布局
 - 可隐藏互动数据和时间
+- 作者信息下方显示「N人赞同了该回答」（可随互动数据一起隐藏）
 - 界面语言自动跟随浏览器，弹窗右上角也能手动一键切换中／English
 - 支持下载 PNG，或直接复制图片到剪贴板
 - 可选在卡片右下角显示 ZhihuCard 署名水印，默认关闭
@@ -57,7 +58,7 @@ MIT
 
 # ZhihuCard
 
-Built by@inwelove · Turn any Zhihu article or answer into a beautiful, shareable card.
+Built by [@inwelove](https://github.com/inwelove) · Turn any Zhihu article or answer into a beautiful, shareable card.
 
 ## Features
 
@@ -69,6 +70,7 @@ Built by@inwelove · Turn any Zhihu article or answer into a beautiful, shareabl
 - One-click translation (via Google Translate), direction-aware
 - Images display in full layout (single, side-by-side, or grid)
 - Optionally hide the engagement stats and the timestamp
+- Shows a "N people upvoted this answer" line under the author
 - UI follows your browser language with manual toggle
 - Download as PNG, or copy to clipboard
 - Optional "ZhihuCard" watermark — off by default

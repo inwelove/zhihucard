@@ -239,6 +239,21 @@
     return String(n);
   }
 
+  function formatLocaleCount(n, locale) {
+    const zh = (locale || "zh-CN").toLowerCase().indexOf("zh") === 0;
+    if (!zh) return formatCount(n);
+    if (n == null || isNaN(n)) return "0";
+    const abs = Math.abs(n);
+    if (abs < 10000) return String(n);
+    if (abs < 1e8) {
+      const v = n / 1e4;
+      const s = v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, "");
+      return s + "万";
+    }
+    const v = n / 1e8;
+    return v.toFixed(1).replace(/\.0$/, "") + "亿";
+  }
+
   // ---------- icons ----------
 
   const ICON_PATHS = {
@@ -465,6 +480,31 @@
 
     header.appendChild(nameCol);
     card.appendChild(header);
+
+    // ----- voteup line -----
+    const likes = data.stats ? (data.stats.likes || 0) : 0;
+    if (!options.hideStats && likes > 0) {
+      const zh = (options.locale || "zh-CN").toLowerCase().indexOf("zh") === 0;
+      const count = formatLocaleCount(likes, options.locale);
+      const voteup = el("div", {
+        fontSize: "15px",
+        fontWeight: "600",
+        color: palette.accent,
+        marginTop: "-8px",
+        marginBottom: "16px",
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+      });
+      voteup.dataset.zhihucardRole = "voteup";
+      voteup.appendChild(el("span", {}, {
+        textContent: zh
+          ? `${count}人${data.type === "article" ? "赞同了该文章" : "赞同了该回答"}`
+          : `Liked by ${count} ${count === "1" ? "person" : "people"}`,
+      }));
+      voteup.appendChild(el("span", { fontSize: "16px", lineHeight: "1" }, { textContent: "›" }));
+      card.appendChild(voteup);
+    }
 
     // ----- body text -----
     const bodyFontSize = options.bodyFontSize || 16;
