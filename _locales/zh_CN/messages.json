@@ -76,5 +76,9 @@
   "editTextLabel": { "message": "编辑文案" },
   "editTextPlaceholder": { "message": "直接修改卡片正文内容…" },
   "editRestoreBtn": { "message": "恢复原文" },
-  "editHint": { "message": "改完自动更新预览" }
+  "editHint": { "message": "改完自动更新预览" },
+  "settingsLabel": { "message": "设置" },
+  "projectLabel": { "message": "项目" },
+  "githubRepoLabel": { "message": "GitHub 仓库" },
+  "feedbackLabel": { "message": "反馈问题" }
 }
