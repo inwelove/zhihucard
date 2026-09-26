@@ -91,6 +91,8 @@
   "presetDeletedText": { "message": "已删除" },
   "presetChipTitle": { "message": "预设用户" },
   "editTextLabel": { "message": "编辑文案" },
+  "editTitleLabel": { "message": "标题" },
+  "editTitlePlaceholder": { "message": "修改卡片标题…" },
   "editTextPlaceholder": { "message": "直接修改卡片正文内容…" },
   "editRestoreBtn": { "message": "恢复原文" },
   "editHint": { "message": "改完自动更新预览" },

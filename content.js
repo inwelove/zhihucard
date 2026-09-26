@@ -81,6 +81,8 @@
     presetDeletedText: "已删除",
     presetChipTitle: "预设用户",
     editTextLabel: "编辑文案",
+    editTitleLabel: "标题",
+    editTitlePlaceholder: "修改卡片标题…",
     editTextPlaceholder: "直接修改卡片正文内容…",
     editRestoreBtn: "恢复原文",
     editHint: "改完自动更新预览",
@@ -2195,6 +2197,30 @@
     {
       const sec = sidebarSection(t("editTextLabel"));
       const originalText = data.text || "";
+      const originalTitle = data.title || "";
+
+      // 标题编辑
+      const titleRow = document.createElement("div");
+      Object.assign(titleRow.style, { display: "flex", alignItems: "center", gap: "8px", padding: "0 0 8px" });
+      const titleLbl = document.createElement("span");
+      Object.assign(titleLbl.style, { fontSize: "13px", color: "#ccc", whiteSpace: "nowrap" });
+      titleLbl.textContent = t("editTitleLabel");
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.value = originalTitle;
+      titleInput.placeholder = t("editTitlePlaceholder");
+      Object.assign(titleInput.style, {
+        flex: "1", minWidth: "0", background: "#2d2d44", border: "1px solid #444",
+        borderRadius: "6px", color: "#e0e0e0", fontSize: "13px", padding: "6px 8px", outline: "none",
+      });
+      let titleTimer = 0;
+      titleInput.addEventListener("input", () => {
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(() => { data.title = titleInput.value; rebuildCard(); }, 400);
+      });
+      titleInput.addEventListener("change", () => { data.title = titleInput.value; rebuildCard(); });
+      titleRow.appendChild(titleLbl); titleRow.appendChild(titleInput);
+      sec.appendChild(titleRow);
 
       const ta = document.createElement("textarea");
       ta.value = originalText;
@@ -2219,6 +2245,8 @@
       restoreBtn.addEventListener("click", () => {
         ta.value = originalText;
         data.text = originalText;
+        titleInput.value = originalTitle;
+        data.title = originalTitle;
         if (state.translatedText) {
           state.translatedText = null;
           if (state.translateCheckbox) state.translateCheckbox.checked = false;

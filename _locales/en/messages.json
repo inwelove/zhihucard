@@ -91,6 +91,8 @@
   "presetDeletedText": { "message": "Removed" },
   "presetChipTitle": { "message": "Saved profile" },
   "editTextLabel": { "message": "Edit text" },
+  "editTitleLabel": { "message": "Title" },
+  "editTitlePlaceholder": { "message": "Edit the card title…" },
   "editTextPlaceholder": { "message": "Edit the card body directly…" },
   "editRestoreBtn": { "message": "Restore original" },
   "editHint": { "message": "Preview updates as you type" },
