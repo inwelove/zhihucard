@@ -1706,6 +1706,7 @@
     try { chrome.storage.onChanged.addListener(shell.host.__zhihuStorage); } catch (_) {}
 
     // ===== SIDEBAR BUILDER HELPERS =====
+    let rebuildSeq = 0;
     function sidebarSection(title) {
       const sec = document.createElement("div");
       Object.assign(sec.style, { padding: "16px 16px 8px" });
@@ -2693,7 +2694,6 @@
       shadow.appendChild(zoomHost);
     }
 
-    let rebuildSeq = 0;
     async function rebuildCard() {
       const seq = ++rebuildSeq;
       const cardData = Object.assign({}, data, {
