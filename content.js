@@ -1706,7 +1706,8 @@
     try { chrome.storage.onChanged.addListener(shell.host.__zhihuStorage); } catch (_) {}
 
     // ===== SIDEBAR BUILDER HELPERS =====
-    let rebuildSeq = 0;
+    // 用 var 提升声明：即使在声明语句执行前被调用也不会抛 TDZ 错误（早调用会被 seq 校验丢弃）
+    var rebuildSeq = 0;
     function sidebarSection(title) {
       const sec = document.createElement("div");
       Object.assign(sec.style, { padding: "16px 16px 8px" });
